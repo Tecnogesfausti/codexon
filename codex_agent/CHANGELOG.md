@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18
+
+- Eliminadas opciones no soportadas por `ttyd 1.7.7` (`--reconnect`).
+- Restaurado `--writable` para que la terminal web acepte entrada.
+
 ## 0.1.17
 
 - El panel web escribe logs y runtime en `/share/codex-agent/` para poder leerlos desde File Browser o desde otro PC.
