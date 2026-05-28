@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Eliminado `build.yaml` obsoleto.
+- Movidos los parámetros de build al Dockerfile.
+
 ## 0.1.6
 
 - Corregida instalación de `ttyd`: Debian bookworm no lo publica como paquete apt, ahora se descarga el binario oficial `1.7.7` para `amd64`/`aarch64`.

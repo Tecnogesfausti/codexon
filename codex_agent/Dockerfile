@@ -1,12 +1,10 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
-ARG CODEX_NPM_PACKAGE="@openai/codex"
-FROM ${BUILD_FROM}
+FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BUILD_ARCH
-ARG BUILD_VERSION
-ARG CODEX_NPM_PACKAGE
+ARG BUILD_ARCH=amd64
+ARG BUILD_VERSION=0.1.7
+ARG CODEX_NPM_PACKAGE="@openai/codex"
 
 LABEL \
   io.hass.name="Codex Agent" \
