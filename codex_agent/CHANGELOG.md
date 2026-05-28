@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.22
+
+- `remote-home-assistant` y `ha-api` priorizan `SUPERVISOR_TOKEN` para acceso interno a Home Assistant.
+- El token largo del usuario queda como override explícito, no como valor por defecto para rutas internas.
+
 ## 0.1.21
 
 - `remote-home-assistant` ahora reutiliza `home_assistant_token` como fallback de autenticación.
