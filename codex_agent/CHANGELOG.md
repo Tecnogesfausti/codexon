@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.14
+
+- Bump de versión para publicar la terminal web visible y directa.
+
 ## 0.1.13
 
 - La terminal web vuelve a compartir sesión vía `tmux`, ahora con el patrón `ttyd tmux -u new -A -s codex-agent bash -l`.
