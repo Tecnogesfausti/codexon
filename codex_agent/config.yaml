@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.1.8"
+version: "0.1.9"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
@@ -75,14 +75,12 @@ options:
   ha_long_lived_token: ""
   mcp_server_url: ""
   mcp_server_api_key: ""
-  mcp_server_headers: "{}"
   codex_model: "gpt-5.3-codex"
   codex_home: "/data/codex"
   workspace: "/ha_config"
   web_terminal_enabled: true
   require_confirmation: true
   install_mcp_servers: true
-  mcp_config: "{}"
   ssh_enabled: false
   ssh_public_keys: []
 schema:
@@ -91,14 +89,12 @@ schema:
   ha_long_lived_token: "password?"
   mcp_server_url: "str?"
   mcp_server_api_key: "password?"
-  mcp_server_headers: "str?"
   codex_model: "str"
   codex_home: "str"
   workspace: "str"
   web_terminal_enabled: "bool"
   require_confirmation: "bool"
   install_mcp_servers: "bool"
-  mcp_config: "str?"
   ssh_enabled: "bool"
   ssh_public_keys:
     - "str"

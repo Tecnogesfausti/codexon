@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Migrado el registro MCP al comando `codex mcp add`, que es lo que Codex CLI usa de verdad.
+- Eliminadas opciones MCP muertas que no se estaban aplicando.
+
 ## 0.1.8
 
 - Añadido paquete `bubblewrap` para que Codex use el sandbox del sistema sin avisos.

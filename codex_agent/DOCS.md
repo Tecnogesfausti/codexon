@@ -75,18 +75,13 @@ Por defecto `WORKSPACE=/ha_config`.
 
 ## MCP
 
-Si `install_mcp_servers` está activo, el arranque genera `/data/codex/mcp-servers.json` con:
+Si `install_mcp_servers` está activo, el arranque registra servidores MCP con `codex mcp add`:
 
-- `ha-config`: servidor MCP filesystem sobre carpetas de Home Assistant.
-- `memory`: servidor MCP de memoria.
-- `remote-home-assistant`: servidor MCP remoto si configuras `mcp_server_url`.
+- `ha-config`: filesystem sobre `/ha_config`, `/addon_config`, `/all_addon_configs`, `/addons` y `/share`.
+- `memory`: servidor de memoria local.
+- `remote-home-assistant`: servidor remoto si configuras `mcp_server_url`.
 
-Opciones MCP:
-
-- `mcp_server_url`: URL del Model Context Protocol Server externo.
-- `mcp_server_api_key`: clave para ese servidor. Se envía como `Authorization: Bearer <clave>`.
-- `mcp_server_headers`: cabeceras adicionales en JSON de texto, por ejemplo `{"X-API-Key":"valor"}`.
-- `mcp_config`: configuración libre en JSON de texto, guardada en `/data/mcp/config.json`.
+`mcp_server_url` y `mcp_server_api_key` son las únicas opciones MCP que necesitas para Home Assistant. El token es el mismo `Long-Lived Access Token` que ya usa `home_assistant_token`.
 
 ## Helpers
 

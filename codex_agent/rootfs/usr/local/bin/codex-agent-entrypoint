@@ -55,9 +55,6 @@ else
   export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
 fi
 
-jq -r '.mcp_config // "{}"' "$CONFIG_PATH" | jq -c '. // {}' > /data/mcp/config.json
-jq -r '.mcp_server_headers // "{}"' "$CONFIG_PATH" | jq -c '. // {}' > /data/mcp/server-headers.json
-
 cat > "$CODEX_HOME/config.toml" <<'EOF'
 cli_auth_credentials_store = "file"
 EOF
@@ -78,43 +75,25 @@ Use these commands for live Home Assistant context:
 Prefer reading live state through `ha-states` and `ha-services` before editing YAML or restarting services.
 EOF
 
-if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
-  cat > "$CODEX_HOME/mcp-servers.json" <<'JSON'
-{
-  "mcpServers": {
-    "ha-config": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/ha_config",
-        "/addon_config",
-        "/all_addon_configs",
-        "/addons",
-        "/share"
-      ]
-    },
-    "memory": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ]
-    }
-  }
+ensure_mcp_server() {
+  local name="$1"
+  shift
+  if codex mcp get "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  codex mcp add "$name" "$@"
 }
-JSON
+
+if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
+  ensure_mcp_server ha-config -- npx -y @modelcontextprotocol/server-filesystem /ha_config /addon_config /all_addon_configs /addons /share
+  ensure_mcp_server memory -- npx -y @modelcontextprotocol/server-memory
   if [[ -n "$MCP_SERVER_URL" ]]; then
-    jq \
-      --arg url "$MCP_SERVER_URL" \
-      --arg api_key "$MCP_SERVER_API_KEY" \
-      --slurpfile extra_headers /data/mcp/server-headers.json \
-      '.mcpServers["remote-home-assistant"] = {
-        "url": $url,
-        "headers": (($extra_headers[0] // {}) + (if $api_key == "" then {} else {"Authorization": ("Bearer " + $api_key)} end))
-      }' \
-      "$CODEX_HOME/mcp-servers.json" > /data/mcp/mcp-servers.tmp
-    mv /data/mcp/mcp-servers.tmp "$CODEX_HOME/mcp-servers.json"
+    if [[ -n "$MCP_SERVER_API_KEY" ]]; then
+      export MCP_SERVER_API_KEY
+      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL" --bearer-token-env-var MCP_SERVER_API_KEY
+    else
+      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL"
+    fi
   fi
 fi
 
@@ -146,6 +125,7 @@ Home Assistant API: ${HA_URL}
 Supervisor API: ${SUPERVISOR_URL}
 Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes"; else echo "no"; fi)
 MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
+MCP servers: $(codex mcp list 2>/dev/null | tr '\n' '; ' || true)
 
 Useful commands:
   Open the Codex Agent sidebar panel for a web terminal.
