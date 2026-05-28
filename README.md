@@ -14,7 +14,22 @@ Repositorio de add-on para ejecutar Codex CLI dentro de Home Assistant con permi
 2. En Home Assistant, ve a **Settings > Add-ons > Add-on Store > Check for updates**.
 3. Instala **Codex Agent**.
 4. Configura como mínimo `openai_api_key` o usa autenticación interactiva de Codex si tu entorno lo permite.
-5. Define `ha_long_lived_token` si quieres que el agente use un token largo de Home Assistant además del `SUPERVISOR_TOKEN` automático del add-on.
+5. Define `home_assistant_token` con un Long-Lived Access Token dedicado para que Codex pueda leer sensores, entidades y servicios.
+6. Si usas un Model Context Protocol Server externo, rellena `mcp_server_url` y `mcp_server_api_key`.
+
+## Acceso a sensores y servicios
+
+El add-on incluye helpers dentro del contenedor:
+
+```sh
+ha-states
+ha-services
+ha-api GET /states
+ha-api GET /services
+ha-call-service light turn_on '{"entity_id":"light.example"}'
+```
+
+Codex recibe un `AGENTS.md` generado en `/data/codex` con estas instrucciones para que consulte estados y servicios vivos antes de cambiar YAML o reiniciar add-ons.
 
 ## Seguridad operativa
 

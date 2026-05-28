@@ -15,7 +15,10 @@ read_bool() {
 }
 
 OPENAI_API_KEY="$(read_option openai_api_key)"
+HOME_ASSISTANT_TOKEN="$(read_option home_assistant_token)"
 HA_LONG_LIVED_TOKEN="$(read_option ha_long_lived_token)"
+MCP_SERVER_URL="$(read_option mcp_server_url)"
+MCP_SERVER_API_KEY="$(read_option mcp_server_api_key)"
 CODEX_MODEL="$(read_option codex_model gpt-5.3-codex)"
 CODEX_HOME="$(read_option codex_home /data/codex)"
 WORKSPACE="$(read_option workspace /ha_config)"
@@ -24,7 +27,10 @@ INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
 SSH_ENABLED="$(read_bool ssh_enabled)"
 
 export OPENAI_API_KEY
+export HOME_ASSISTANT_TOKEN
 export HA_LONG_LIVED_TOKEN
+export MCP_SERVER_URL
+export MCP_SERVER_API_KEY
 export CODEX_MODEL
 export CODEX_HOME
 export WORKSPACE
@@ -35,13 +41,32 @@ export SUPERVISOR_URL="http://supervisor"
 mkdir -p "$CODEX_HOME" "$WORKSPACE" /data/logs /data/mcp /run/sshd
 chmod 700 "$CODEX_HOME"
 
-if [[ -n "$HA_LONG_LIVED_TOKEN" ]]; then
+if [[ -n "$HOME_ASSISTANT_TOKEN" ]]; then
+  export HA_TOKEN="$HOME_ASSISTANT_TOKEN"
+elif [[ -n "$HA_LONG_LIVED_TOKEN" ]]; then
   export HA_TOKEN="$HA_LONG_LIVED_TOKEN"
 else
   export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
 fi
 
 jq '.mcp_config // {}' "$CONFIG_PATH" > /data/mcp/config.json
+jq '.mcp_server_headers // {}' "$CONFIG_PATH" > /data/mcp/server-headers.json
+
+cat > "$CODEX_HOME/AGENTS.md" <<'EOF'
+# Codex Agent Home Assistant Context
+
+You are running inside the Home Assistant Codex Agent add-on.
+
+Use these commands for live Home Assistant context:
+
+- `ha-states`: list all entities, including sensors, binary sensors, switches, lights, automations, scripts, and integrations.
+- `ha-services`: list every service exposed by Home Assistant.
+- `ha-api METHOD /path '{"json":"body"}'`: call the Home Assistant REST API through the Supervisor proxy.
+- `ha-call-service domain service '{"entity_id":"sensor.example"}'`: call a Home Assistant service.
+- `supervisor-api METHOD /path '{"json":"body"}'`: call Supervisor API for add-ons, logs, services, and system management.
+
+Prefer reading live state through `ha-states` and `ha-services` before editing YAML or restarting services.
+EOF
 
 if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
   cat > "$CODEX_HOME/mcp-servers.json" <<'JSON'
@@ -69,6 +94,18 @@ if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
   }
 }
 JSON
+  if [[ -n "$MCP_SERVER_URL" ]]; then
+    jq \
+      --arg url "$MCP_SERVER_URL" \
+      --arg api_key "$MCP_SERVER_API_KEY" \
+      --slurpfile extra_headers /data/mcp/server-headers.json \
+      '.mcpServers["remote-home-assistant"] = {
+        "url": $url,
+        "headers": (($extra_headers[0] // {}) + (if $api_key == "" then {} else {"Authorization": ("Bearer " + $api_key)} end))
+      }' \
+      "$CODEX_HOME/mcp-servers.json" > /data/mcp/mcp-servers.tmp
+    mv /data/mcp/mcp-servers.tmp "$CODEX_HOME/mcp-servers.json"
+  fi
 fi
 
 if [[ "$SSH_ENABLED" == "true" ]]; then
@@ -86,10 +123,15 @@ Workspace: ${WORKSPACE}
 Codex home: ${CODEX_HOME}
 Home Assistant API: ${HA_URL}
 Supervisor API: ${SUPERVISOR_URL}
+Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes"; else echo "no"; fi)
+MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
 
 Useful commands:
   codex --model "${CODEX_MODEL}" "${WORKSPACE}"
+  ha-states
+  ha-services
   ha-api GET /config
+  ha-call-service light turn_on '{"entity_id":"light.example"}'
   supervisor-api GET /addons
   host-shell
 EOF

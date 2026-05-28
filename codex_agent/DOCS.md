@@ -14,14 +14,24 @@ Todos estos montajes están en modo lectura/escritura.
 
 ## Tokens
 
-Home Assistant inyecta `SUPERVISOR_TOKEN` automáticamente cuando `hassio_api` y `homeassistant_api` están activados. Este add-on también permite configurar `ha_long_lived_token` para llamadas directas o persistentes contra la API de Home Assistant.
+Home Assistant inyecta `SUPERVISOR_TOKEN` automáticamente cuando `hassio_api` y `homeassistant_api` están activados. Este add-on también permite configurar `home_assistant_token` para llamadas directas o persistentes contra la API de Home Assistant. `ha_long_lived_token` se mantiene como alias compatible.
 
 Usa un token dedicado:
 
 1. En Home Assistant, abre tu perfil de usuario.
 2. Crea un Long-Lived Access Token.
-3. Pégalo en la opción `ha_long_lived_token`.
+3. Pégalo en la opción `home_assistant_token`.
 4. Revócalo si dejas de usar el agente.
+
+Con ese token, Codex puede leer todos los estados y llamar servicios mediante:
+
+```sh
+ha-states
+ha-services
+ha-api GET /states
+ha-api GET /services
+ha-call-service homeassistant restart '{}'
+```
 
 ## Codex
 
@@ -45,8 +55,14 @@ Si `install_mcp_servers` está activo, el arranque genera `/data/codex/mcp-serve
 
 - `ha-config`: servidor MCP filesystem sobre carpetas de Home Assistant.
 - `memory`: servidor MCP de memoria.
+- `remote-home-assistant`: servidor MCP remoto si configuras `mcp_server_url`.
 
-También se guarda el contenido libre de `mcp_config` en `/data/mcp/config.json` para que puedas añadir servidores MCP propios sin reconstruir la imagen.
+Opciones MCP:
+
+- `mcp_server_url`: URL del Model Context Protocol Server externo.
+- `mcp_server_api_key`: clave para ese servidor. Se envía como `Authorization: Bearer <clave>`.
+- `mcp_server_headers`: cabeceras adicionales.
+- `mcp_config`: configuración libre guardada en `/data/mcp/config.json`.
 
 ## Helpers
 
@@ -54,6 +70,9 @@ El add-on incluye dos comandos:
 
 ```sh
 ha-api GET /config
+ha-states
+ha-services
+ha-call-service light turn_on '{"entity_id":"light.example"}'
 supervisor-api GET /addons
 host-shell
 ```
@@ -62,6 +81,8 @@ Ejemplos:
 
 ```sh
 ha-api POST /services/homeassistant/restart '{}'
+ha-states | grep '^sensor\.'
+ha-services
 supervisor-api GET /addons/core_configurator/info
 host-shell
 ```

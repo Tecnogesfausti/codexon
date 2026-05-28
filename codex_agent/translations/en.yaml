@@ -3,8 +3,20 @@ configuration:
     name: OpenAI API key
     description: Optional API key used by Codex CLI.
   ha_long_lived_token:
-    name: Home Assistant long-lived token
-    description: Optional dedicated token for Home Assistant API calls.
+    name: Home Assistant long-lived token legacy alias
+    description: Deprecated alias for home_assistant_token.
+  home_assistant_token:
+    name: Home Assistant API token
+    description: Dedicated long-lived token for Home Assistant API calls.
+  mcp_server_url:
+    name: MCP server URL
+    description: Optional remote Model Context Protocol Server URL.
+  mcp_server_api_key:
+    name: MCP server API key
+    description: Optional API key sent to the remote MCP server.
+  mcp_server_headers:
+    name: MCP server headers
+    description: Optional extra headers sent to the remote MCP server.
   codex_model:
     name: Codex model
     description: Model passed to Codex CLI by default.

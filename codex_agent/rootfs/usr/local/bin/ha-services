@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ha-api GET /services | jq -r '
+  .[]
+  | .domain as $domain
+  | .services
+  | keys[]
+  | "\($domain).\(.)"
+' | sort

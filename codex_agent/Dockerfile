@@ -51,6 +51,13 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 COPY rootfs/ /
-RUN chmod +x /usr/local/bin/codex-agent-entrypoint /usr/local/bin/ha-api /usr/local/bin/host-shell /usr/local/bin/supervisor-api
+RUN chmod +x \
+  /usr/local/bin/codex-agent-entrypoint \
+  /usr/local/bin/ha-api \
+  /usr/local/bin/ha-call-service \
+  /usr/local/bin/ha-services \
+  /usr/local/bin/ha-states \
+  /usr/local/bin/host-shell \
+  /usr/local/bin/supervisor-api
 
 CMD ["/usr/local/bin/codex-agent-entrypoint"]
