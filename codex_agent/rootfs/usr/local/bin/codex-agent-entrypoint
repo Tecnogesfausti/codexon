@@ -106,7 +106,9 @@ if [[ "$SSH_ENABLED" == "true" ]]; then
 fi
 
 if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
-  ttyd \
+  {
+    echo "[$(date -Is)] ttyd starting"
+    ttyd \
     --port 8099 \
     --interface 0.0.0.0 \
     --reconnect 30 \
@@ -117,7 +119,8 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     --client-option cursorStyle=bar \
     --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
     --client-option disableLeaveAlert=true \
-    /bin/bash -l &
+    /bin/bash /usr/local/bin/web-terminal.sh
+  } >>/data/logs/web-terminal.log 2>&1 &
 fi
 
 cat >/data/README-runtime.txt <<EOF

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.16
+
+- Añadido `web-terminal.sh` con trazas a `/data/logs/web-terminal.log`.
+- Redirigida la salida de `ttyd` a ese mismo log para diagnosticar pantallas en blanco.
+
 ## 0.1.15
 
 - Bump de versión para publicar la terminal web directa con tema visible.

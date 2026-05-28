@@ -66,6 +66,7 @@ RUN chmod +x \
   /usr/local/bin/ha-services \
   /usr/local/bin/ha-states \
   /usr/local/bin/host-shell \
+  /usr/local/bin/web-terminal.sh \
   /usr/local/bin/supervisor-api
 
 CMD ["/usr/local/bin/codex-agent-entrypoint"]
