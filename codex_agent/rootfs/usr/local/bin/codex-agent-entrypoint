@@ -106,19 +106,20 @@ if [[ "$SSH_ENABLED" == "true" ]]; then
 fi
 
 if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
+  mkdir -p /share/codex-agent
   {
     echo "[$(date -Is)] ttyd starting"
     ttyd \
-    --port 8099 \
-    --interface 0.0.0.0 \
-    --writable \
-    --terminal-type xterm-256color \
-    --client-option titleFixed="Codex Agent" \
-    --client-option cursorBlink=true \
-    --client-option cursorStyle=bar \
-    --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
-    --client-option disableLeaveAlert=true \
-    /bin/bash /usr/local/bin/web-terminal.sh
+      --port 8099 \
+      --interface 0.0.0.0 \
+      --writable \
+      --terminal-type xterm-256color \
+      --client-option titleFixed="Codex Agent" \
+      --client-option cursorBlink=true \
+      --client-option cursorStyle=bar \
+      --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
+      --client-option disableLeaveAlert=true \
+      script -q -f -a /share/codex-agent/web-terminal.log -c "/bin/bash /usr/local/bin/web-terminal.sh"
   } >>/share/codex-agent/web-terminal.log 2>&1 &
 fi
 

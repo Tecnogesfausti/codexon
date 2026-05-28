@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.20
+
+- Cambiada la grabación del terminal web de `tee` a `script -f -a` para conservar un TTY real.
+- `codex .` vuelve a ver `stdout` como terminal interactiva.
+
 ## 0.1.19
 
 - La terminal web duplica la salida con `tee`, así se ve en pantalla y también queda en el log.
