@@ -26,7 +26,11 @@ REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
 INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
 SSH_ENABLED="$(read_bool ssh_enabled)"
 
-export OPENAI_API_KEY
+if [[ -n "$OPENAI_API_KEY" ]]; then
+  export OPENAI_API_KEY
+else
+  unset OPENAI_API_KEY
+fi
 export HOME_ASSISTANT_TOKEN
 export HA_LONG_LIVED_TOKEN
 export MCP_SERVER_URL
@@ -51,6 +55,10 @@ fi
 
 jq '.mcp_config // {}' "$CONFIG_PATH" > /data/mcp/config.json
 jq '.mcp_server_headers // {}' "$CONFIG_PATH" > /data/mcp/server-headers.json
+
+cat > "$CODEX_HOME/config.toml" <<'EOF'
+cli_auth_credentials_store = "file"
+EOF
 
 cat > "$CODEX_HOME/AGENTS.md" <<'EOF'
 # Codex Agent Home Assistant Context
@@ -127,6 +135,7 @@ Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes";
 MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
 
 Useful commands:
+  codex-login-chatgpt
   codex --model "${CODEX_MODEL}" "${WORKSPACE}"
   ha-states
   ha-services

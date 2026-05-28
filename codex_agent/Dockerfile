@@ -53,6 +53,7 @@ RUN apt-get update \
 COPY rootfs/ /
 RUN chmod +x \
   /usr/local/bin/codex-agent-entrypoint \
+  /usr/local/bin/codex-login-chatgpt \
   /usr/local/bin/ha-api \
   /usr/local/bin/ha-call-service \
   /usr/local/bin/ha-services \

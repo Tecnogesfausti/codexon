@@ -13,9 +13,10 @@ Repositorio de add-on para ejecutar Codex CLI dentro de Home Assistant con permi
 1. Copia este repositorio en `/addons/ha_codex_agent` dentro de Home Assistant OS/Supervised, o añádelo como repositorio de add-ons si lo publicas en GitHub.
 2. En Home Assistant, ve a **Settings > Add-ons > Add-on Store > Check for updates**.
 3. Instala **Codex Agent**.
-4. Configura como mínimo `openai_api_key` o usa autenticación interactiva de Codex si tu entorno lo permite.
+4. Deja `openai_api_key` vacío si vas a iniciar sesión con tu cuenta de ChatGPT/Codex desde la terminal.
 5. Define `home_assistant_token` con un Long-Lived Access Token dedicado para que Codex pueda leer sensores, entidades y servicios.
 6. Si usas un Model Context Protocol Server externo, rellena `mcp_server_url` y `mcp_server_api_key`.
+7. Activa `ssh_enabled` y añade tu clave pública SSH para poder entrar al contenedor y ejecutar `codex-login-chatgpt`.
 
 ## Acceso a sensores y servicios
 

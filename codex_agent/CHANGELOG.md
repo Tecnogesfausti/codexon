@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Documentado flujo principal con inicio de sesión ChatGPT/Codex en vez de API key.
+- Añadido helper `codex-login-chatgpt` para autenticación por código de dispositivo en entornos headless.
+- Configurado almacenamiento de credenciales de Codex en fichero persistente bajo `/data/codex`.
+- Evitado exportar `OPENAI_API_KEY` cuando la opción está vacía.
+
 ## 0.1.1
 
 - Añadidas opciones explícitas `home_assistant_token`, `mcp_server_url`, `mcp_server_api_key` y `mcp_server_headers`.

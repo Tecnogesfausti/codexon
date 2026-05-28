@@ -41,13 +41,23 @@ El contenedor instala Codex CLI con:
 npm install -g @openai/codex
 ```
 
-Dentro del contenedor puedes lanzar una sesión manual:
+La forma recomendada es iniciar sesión con ChatGPT/Codex desde una terminal del contenedor:
+
+```sh
+codex-login-chatgpt
+```
+
+El comando usa autenticación por código de dispositivo. Abres el enlace en tu navegador, introduces el código y Codex guarda la sesión en `/data/codex/auth.json`. No hace falta `openai_api_key` para este modo.
+
+Después puedes lanzar una sesión manual:
 
 ```sh
 codex --model "$CODEX_MODEL" "$WORKSPACE"
 ```
 
 Por defecto `WORKSPACE=/ha_config`.
+
+`openai_api_key` solo es necesaria si prefieres usar facturación de OpenAI API por uso.
 
 ## MCP
 
@@ -92,6 +102,13 @@ host-shell
 ## SSH opcional
 
 Activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.
+
+Una vez dentro:
+
+```sh
+codex-login-chatgpt
+codex /ha_config
+```
 
 ## Riesgos
 
