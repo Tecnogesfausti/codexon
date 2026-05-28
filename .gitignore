@@ -1,0 +1,13 @@
+# Local secrets and Home Assistant add-on options.
+secrets/
+*.secrets.yaml
+*.secrets.yml
+*.secrets.json
+.env
+.env.*
+
+# Keep examples/templates tracked.
+!*.example.yaml
+!*.example.yml
+!*.example.json
+!.env.example
