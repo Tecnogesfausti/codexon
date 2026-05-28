@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Corregida instalación de `ttyd`: Debian bookworm no lo publica como paquete apt, ahora se descarga el binario oficial `1.7.7` para `amd64`/`aarch64`.
+
 ## 0.1.5
 
 - Corregido schema de `mcp_config` y `mcp_server_headers`: Home Assistant no acepta `dict?`, ahora se configuran como JSON en texto.

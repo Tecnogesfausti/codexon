@@ -41,13 +41,19 @@ RUN apt-get update \
     shellcheck \
     sudo \
     tmux \
-    ttyd \
     unzip \
     util-linux \
     vim-tiny \
     yq \
   && npm install -g "${CODEX_NPM_PACKAGE}" \
   && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
+  && case "${BUILD_ARCH}" in \
+      amd64) TTYD_ARCH="x86_64" ;; \
+      aarch64) TTYD_ARCH="aarch64" ;; \
+      *) echo "Unsupported ttyd architecture: ${BUILD_ARCH}" >&2; exit 1 ;; \
+    esac \
+  && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.${TTYD_ARCH}" -o /usr/local/bin/ttyd \
+  && chmod +x /usr/local/bin/ttyd \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
