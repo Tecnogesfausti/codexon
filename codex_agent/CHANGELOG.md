@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12
+
+- Simplificada la terminal web para arrancar un login shell directo en `WORKSPACE`.
+- Eliminado `tmux` de la ruta de arranque del panel web para evitar fallos `execvp`.
+
 ## 0.1.11
 
 - `ttyd` ahora invoca `bash` directamente con el wrapper de terminal.
