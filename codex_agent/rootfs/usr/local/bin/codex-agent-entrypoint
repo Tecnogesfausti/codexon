@@ -115,7 +115,7 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     --terminal-type xterm-256color \
     --client-option titleFixed="Codex Agent" \
     --client-option disableLeaveAlert=true \
-    /usr/local/bin/codex-agent-shell &
+    /bin/bash /usr/local/bin/codex-agent-shell &
 fi
 
 cat >/data/README-runtime.txt <<EOF

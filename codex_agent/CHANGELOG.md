@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11
+
+- `ttyd` ahora invoca `bash` directamente con el wrapper de terminal.
+- `codex-agent-shell` usa `tmux new-session -A` para evitar fallos al adjuntar.
+
 ## 0.1.10
 
 - El panel web usa `tmux` como backend para resistir desconexiones.
