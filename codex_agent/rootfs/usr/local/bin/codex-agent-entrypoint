@@ -111,11 +111,13 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     --interface 0.0.0.0 \
     --reconnect 30 \
     --ping-interval 2 \
-    --writable \
     --terminal-type xterm-256color \
     --client-option titleFixed="Codex Agent" \
+    --client-option cursorBlink=true \
+    --client-option cursorStyle=bar \
+    --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
     --client-option disableLeaveAlert=true \
-    tmux -u new -A -s codex-agent /bin/bash -l &
+    /bin/bash -l &
 fi
 
 cat >/data/README-runtime.txt <<EOF
