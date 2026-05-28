@@ -1,0 +1,86 @@
+# Codex Agent
+
+Codex Agent ejecuta Codex CLI dentro de Home Assistant como add-on con permisos amplios. Está orientado a administrar configuración, add-ons locales, carpetas compartidas y servicios accesibles mediante Supervisor.
+
+## Qué monta
+
+- `/ha_config`: configuración de Home Assistant.
+- `/addon_config`: configuración propia del add-on.
+- `/all_addon_configs`: configuraciones de todos los add-ons.
+- `/addons`: add-ons locales.
+- `/share`, `/media`, `/backup`, `/ssl`: carpetas estándar de Home Assistant.
+
+Todos estos montajes están en modo lectura/escritura.
+
+## Tokens
+
+Home Assistant inyecta `SUPERVISOR_TOKEN` automáticamente cuando `hassio_api` y `homeassistant_api` están activados. Este add-on también permite configurar `ha_long_lived_token` para llamadas directas o persistentes contra la API de Home Assistant.
+
+Usa un token dedicado:
+
+1. En Home Assistant, abre tu perfil de usuario.
+2. Crea un Long-Lived Access Token.
+3. Pégalo en la opción `ha_long_lived_token`.
+4. Revócalo si dejas de usar el agente.
+
+## Codex
+
+El contenedor instala Codex CLI con:
+
+```sh
+npm install -g @openai/codex
+```
+
+Dentro del contenedor puedes lanzar una sesión manual:
+
+```sh
+codex --model "$CODEX_MODEL" "$WORKSPACE"
+```
+
+Por defecto `WORKSPACE=/ha_config`.
+
+## MCP
+
+Si `install_mcp_servers` está activo, el arranque genera `/data/codex/mcp-servers.json` con:
+
+- `ha-config`: servidor MCP filesystem sobre carpetas de Home Assistant.
+- `memory`: servidor MCP de memoria.
+
+También se guarda el contenido libre de `mcp_config` en `/data/mcp/config.json` para que puedas añadir servidores MCP propios sin reconstruir la imagen.
+
+## Helpers
+
+El add-on incluye dos comandos:
+
+```sh
+ha-api GET /config
+supervisor-api GET /addons
+host-shell
+```
+
+Ejemplos:
+
+```sh
+ha-api POST /services/homeassistant/restart '{}'
+supervisor-api GET /addons/core_configurator/info
+host-shell
+```
+
+`host-shell` usa `nsenter` contra el proceso 1 del host. Requiere que la instalación respete `host_pid: true` y los privilegios declarados por el add-on. Es la vía para inspección avanzada del sistema cuando los montajes estándar de Home Assistant no bastan.
+
+## SSH opcional
+
+Activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.
+
+## Riesgos
+
+Este add-on se declara con:
+
+- `full_access: true`
+- `protected: false`
+- `apparmor: false`
+- `host_pid`, `host_network`, `host_dbus`, `host_ipc`, `host_uts`
+- `hassio_role: admin`
+- montajes RW de configuración y add-ons
+
+Eso permite cambiar o romper el sistema con facilidad. Úsalo solo en redes y máquinas de confianza.

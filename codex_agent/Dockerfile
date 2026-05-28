@@ -1,0 +1,56 @@
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
+ARG CODEX_NPM_PACKAGE="@openai/codex"
+FROM ${BUILD_FROM}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG BUILD_ARCH
+ARG BUILD_VERSION
+ARG CODEX_NPM_PACKAGE
+
+LABEL \
+  io.hass.name="Codex Agent" \
+  io.hass.description="Codex CLI agent with broad Home Assistant Supervisor access" \
+  io.hass.version="${BUILD_VERSION}" \
+  io.hass.type="addon" \
+  io.hass.arch="${BUILD_ARCH}"
+
+ENV \
+  LANG=C.UTF-8 \
+  LC_ALL=C.UTF-8 \
+  NODE_ENV=production \
+  CODEX_HOME=/data/codex
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    git \
+    jq \
+    less \
+    nano \
+    nodejs \
+    npm \
+    openssh-server \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ripgrep \
+    rsync \
+    shellcheck \
+    sudo \
+    tmux \
+    unzip \
+    util-linux \
+    vim-tiny \
+    yq \
+  && npm install -g "${CODEX_NPM_PACKAGE}" \
+  && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY rootfs/ /
+RUN chmod +x /usr/local/bin/codex-agent-entrypoint /usr/local/bin/ha-api /usr/local/bin/host-shell /usr/local/bin/supervisor-api
+
+CMD ["/usr/local/bin/codex-agent-entrypoint"]

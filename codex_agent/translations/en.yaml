@@ -1,0 +1,31 @@
+configuration:
+  openai_api_key:
+    name: OpenAI API key
+    description: Optional API key used by Codex CLI.
+  ha_long_lived_token:
+    name: Home Assistant long-lived token
+    description: Optional dedicated token for Home Assistant API calls.
+  codex_model:
+    name: Codex model
+    description: Model passed to Codex CLI by default.
+  codex_home:
+    name: Codex home
+    description: Persistent home directory for Codex.
+  workspace:
+    name: Workspace
+    description: Default directory where Codex should work.
+  require_confirmation:
+    name: Require confirmation
+    description: Keep manual confirmation enabled for agent actions.
+  install_mcp_servers:
+    name: Install MCP servers
+    description: Generate default filesystem and memory MCP server configuration.
+  mcp_config:
+    name: MCP config
+    description: Custom MCP configuration stored under /data/mcp/config.json.
+  ssh_enabled:
+    name: SSH enabled
+    description: Enable SSH access on port 2222.
+  ssh_public_keys:
+    name: SSH public keys
+    description: Public keys allowed to access the agent container.

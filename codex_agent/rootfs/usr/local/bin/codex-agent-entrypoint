@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONFIG_PATH=/data/options.json
+
+read_option() {
+  local key="$1"
+  local fallback="${2:-}"
+  jq -r --arg key "$key" --arg fallback "$fallback" '.[$key] // $fallback' "$CONFIG_PATH"
+}
+
+read_bool() {
+  local key="$1"
+  jq -r --arg key "$key" '.[$key] // false' "$CONFIG_PATH"
+}
+
+OPENAI_API_KEY="$(read_option openai_api_key)"
+HA_LONG_LIVED_TOKEN="$(read_option ha_long_lived_token)"
+CODEX_MODEL="$(read_option codex_model gpt-5.3-codex)"
+CODEX_HOME="$(read_option codex_home /data/codex)"
+WORKSPACE="$(read_option workspace /ha_config)"
+REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
+INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
+SSH_ENABLED="$(read_bool ssh_enabled)"
+
+export OPENAI_API_KEY
+export HA_LONG_LIVED_TOKEN
+export CODEX_MODEL
+export CODEX_HOME
+export WORKSPACE
+export HOME="$CODEX_HOME"
+export HA_URL="http://supervisor/core/api"
+export SUPERVISOR_URL="http://supervisor"
+
+mkdir -p "$CODEX_HOME" "$WORKSPACE" /data/logs /data/mcp /run/sshd
+chmod 700 "$CODEX_HOME"
+
+if [[ -n "$HA_LONG_LIVED_TOKEN" ]]; then
+  export HA_TOKEN="$HA_LONG_LIVED_TOKEN"
+else
+  export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
+fi
+
+jq '.mcp_config // {}' "$CONFIG_PATH" > /data/mcp/config.json
+
+if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
+  cat > "$CODEX_HOME/mcp-servers.json" <<'JSON'
+{
+  "mcpServers": {
+    "ha-config": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/ha_config",
+        "/addon_config",
+        "/all_addon_configs",
+        "/addons",
+        "/share"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    }
+  }
+}
+JSON
+fi
+
+if [[ "$SSH_ENABLED" == "true" ]]; then
+  mkdir -p "$CODEX_HOME/.ssh"
+  jq -r '.ssh_public_keys[]? // empty' "$CONFIG_PATH" > "$CODEX_HOME/.ssh/authorized_keys"
+  chmod 700 "$CODEX_HOME/.ssh"
+  chmod 600 "$CODEX_HOME/.ssh/authorized_keys"
+  /usr/sbin/sshd -D -p 2222 &
+fi
+
+cat >/data/README-runtime.txt <<EOF
+Codex Agent runtime
+
+Workspace: ${WORKSPACE}
+Codex home: ${CODEX_HOME}
+Home Assistant API: ${HA_URL}
+Supervisor API: ${SUPERVISOR_URL}
+
+Useful commands:
+  codex --model "${CODEX_MODEL}" "${WORKSPACE}"
+  ha-api GET /config
+  supervisor-api GET /addons
+  host-shell
+EOF
+
+echo "[codex-agent] ready"
+echo "[codex-agent] workspace: ${WORKSPACE}"
+echo "[codex-agent] require_confirmation: ${REQUIRE_CONFIRMATION}"
+echo "[codex-agent] start a shell with: docker exec -it <container> bash"
+
+tail -f /dev/null

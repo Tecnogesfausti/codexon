@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+METHOD="${1:-GET}"
+PATH_PART="${2:-/}"
+BODY="${3:-}"
+TOKEN="${HA_LONG_LIVED_TOKEN:-${SUPERVISOR_TOKEN:-}}"
+
+if [[ -z "$TOKEN" ]]; then
+  echo "Missing HA_LONG_LIVED_TOKEN or SUPERVISOR_TOKEN" >&2
+  exit 1
+fi
+
+URL="http://supervisor/core/api${PATH_PART}"
+
+if [[ -n "$BODY" ]]; then
+  curl -fsS -X "$METHOD" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$BODY" \
+    "$URL"
+else
+  curl -fsS -X "$METHOD" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    "$URL"
+fi
