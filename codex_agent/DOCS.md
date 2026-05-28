@@ -4,7 +4,7 @@ Codex Agent ejecuta Codex CLI dentro de Home Assistant como add-on con permisos 
 
 ## Panel lateral
 
-El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Codex Agent**, igual que otros terminales web. El panel abre una terminal `ttyd` dentro del contenedor en el workspace configurado.
+El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Codex Agent**, igual que otros terminales web. El panel abre una terminal `ttyd` dentro del contenedor con una sesión `tmux` llamada `codex-agent`.
 
 Desde ese panel puedes ejecutar:
 
@@ -107,6 +107,8 @@ host-shell
 ```
 
 `host-shell` usa `nsenter` contra el proceso 1 del host. Requiere que la instalación respete `host_pid: true` y los privilegios declarados por el add-on. Es la vía para inspección avanzada del sistema cuando los montajes estándar de Home Assistant no bastan.
+
+Si el navegador se desconecta, vuelve a abrir el panel y la sesión `codex-agent` seguirá viva.
 
 ## SSH opcional
 

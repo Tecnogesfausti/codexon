@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13
+
+- La terminal web vuelve a compartir sesión vía `tmux`, ahora con el patrón `ttyd tmux -u new -A -s codex-agent bash -l`.
+- El panel lateral debería reconectar a la misma shell en vez de abrir una sesión vacía.
+
 ## 0.1.12
 
 - Simplificada la terminal web para arrancar un login shell directo en `WORKSPACE`.

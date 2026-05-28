@@ -115,7 +115,7 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     --terminal-type xterm-256color \
     --client-option titleFixed="Codex Agent" \
     --client-option disableLeaveAlert=true \
-    /bin/bash -lc "cd \"$WORKSPACE\" && exec /bin/bash -l" &
+    tmux -u new -A -s codex-agent /bin/bash -l &
 fi
 
 cat >/data/README-runtime.txt <<EOF
