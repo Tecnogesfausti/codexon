@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.23
+
+- `ha-api` y el MCP remoto vuelven a priorizar el token largo de Home Assistant.
+- `SUPERVISOR_TOKEN` queda solo como fallback final.
+
 ## 0.1.22
 
 - `remote-home-assistant` y `ha-api` priorizan `SUPERVISOR_TOKEN` para acceso interno a Home Assistant.
