@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.24
+
+- `ha-api` y `remote-home-assistant` priorizan `SUPERVISOR_TOKEN` para el proxy interno `http://supervisor/core/api`.
+- `home_assistant_token` queda como fallback, no como credencial principal para esas rutas.
+
 ## 0.1.23
 
 - `ha-api` y el MCP remoto vuelven a priorizar el token largo de Home Assistant.

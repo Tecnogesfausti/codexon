@@ -4,7 +4,7 @@ set -Eeuo pipefail
 METHOD="${1:-GET}"
 PATH_PART="${2:-/}"
 BODY="${3:-}"
-TOKEN="${HOME_ASSISTANT_TOKEN:-${HA_LONG_LIVED_TOKEN:-${SUPERVISOR_TOKEN:-}}}"
+TOKEN="${SUPERVISOR_TOKEN:-${HOME_ASSISTANT_TOKEN:-${HA_LONG_LIVED_TOKEN:-}}}"
 
 if [[ -z "$TOKEN" && -r /data/options.json ]]; then
   TOKEN="$(jq -r '.home_assistant_token // .ha_long_lived_token // ""' /data/options.json)"
