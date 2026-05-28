@@ -12,7 +12,7 @@ LABEL \
   io.hass.name="Codex Agent" \
   io.hass.description="Codex CLI agent with broad Home Assistant Supervisor access" \
   io.hass.version="${BUILD_VERSION}" \
-  io.hass.type="addon" \
+  io.hass.type="app" \
   io.hass.arch="${BUILD_ARCH}"
 
 ENV \

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- Añadidas arquitecturas `armhf`, `armv7` e `i386` para que el Store no oculte el add-on en instalaciones de 32 bits.
+- Actualizada etiqueta Docker `io.hass.type` al valor actual `app`.
+
 ## 0.1.3
 
 - Añadido panel lateral por Home Assistant Ingress.
