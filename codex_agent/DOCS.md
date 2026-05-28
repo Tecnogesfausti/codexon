@@ -85,8 +85,8 @@ Opciones MCP:
 
 - `mcp_server_url`: URL del Model Context Protocol Server externo.
 - `mcp_server_api_key`: clave para ese servidor. Se envía como `Authorization: Bearer <clave>`.
-- `mcp_server_headers`: cabeceras adicionales.
-- `mcp_config`: configuración libre guardada en `/data/mcp/config.json`.
+- `mcp_server_headers`: cabeceras adicionales en JSON de texto, por ejemplo `{"X-API-Key":"valor"}`.
+- `mcp_config`: configuración libre en JSON de texto, guardada en `/data/mcp/config.json`.
 
 ## Helpers
 

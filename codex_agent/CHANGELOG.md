@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Corregido schema de `mcp_config` y `mcp_server_headers`: Home Assistant no acepta `dict?`, ahora se configuran como JSON en texto.
+- Eliminadas arquitecturas antiguas para evitar avisos de Supervisor.
+
 ## 0.1.4
 
 - Añadidas arquitecturas `armhf`, `armv7` e `i386` para que el Store no oculte el add-on en instalaciones de 32 bits.

@@ -55,8 +55,8 @@ else
   export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
 fi
 
-jq '.mcp_config // {}' "$CONFIG_PATH" > /data/mcp/config.json
-jq '.mcp_server_headers // {}' "$CONFIG_PATH" > /data/mcp/server-headers.json
+jq -r '.mcp_config // "{}"' "$CONFIG_PATH" | jq -c '. // {}' > /data/mcp/config.json
+jq -r '.mcp_server_headers // "{}"' "$CONFIG_PATH" | jq -c '. // {}' > /data/mcp/server-headers.json
 
 cat > "$CODEX_HOME/config.toml" <<'EOF'
 cli_auth_credentials_store = "file"
