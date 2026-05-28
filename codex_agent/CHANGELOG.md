@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.8
+
+- Añadido paquete `bubblewrap` para que Codex use el sandbox del sistema sin avisos.
+
 ## 0.1.7
 
 - Eliminado `build.yaml` obsoleto.
