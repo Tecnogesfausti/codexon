@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+- Bump de versión para publicar la terminal web directa con tema visible.
+
 ## 0.1.14
 
 - Bump de versión para publicar la terminal web visible y directa.
