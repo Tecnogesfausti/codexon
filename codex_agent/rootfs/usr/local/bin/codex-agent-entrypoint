@@ -41,7 +41,11 @@ export CODEX_HOME
 export WORKSPACE
 export WEB_TERMINAL_ENABLED
 export HOME="$CODEX_HOME"
-export HA_URL="http://supervisor/core/api"
+if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
+  export HA_URL="http://supervisor/core/api"
+else
+  export HA_URL="http://homeassistant:8123/api"
+fi
 export SUPERVISOR_URL="http://supervisor"
 
 mkdir -p "$CODEX_HOME" "$WORKSPACE" /data/logs /data/mcp /run/sshd
@@ -57,6 +61,13 @@ fi
 
 MCP_AUTH_TOKEN="${MCP_SERVER_API_KEY:-${SUPERVISOR_TOKEN:-${HA_TOKEN:-}}}"
 export MCP_AUTH_TOKEN
+
+if [[ -z "${SUPERVISOR_TOKEN:-}" ]]; then
+  if [[ -z "$MCP_SERVER_URL" || "$MCP_SERVER_URL" == "http://supervisor/core/api/mcp" ]]; then
+    MCP_SERVER_URL="http://homeassistant:8123/api/mcp"
+  fi
+  export MCP_SERVER_URL
+fi
 
 cat > "$CODEX_HOME/config.toml" <<'EOF'
 cli_auth_credentials_store = "file"

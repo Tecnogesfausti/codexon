@@ -81,7 +81,7 @@ Si `install_mcp_servers` está activo, el arranque registra servidores MCP con `
 - `memory`: servidor de memoria local.
 - `remote-home-assistant`: servidor remoto si configuras `mcp_server_url`.
 
-`mcp_server_url` es la única opción MCP obligatoria para Home Assistant. Si rellenas `mcp_server_api_key`, se usa esa; si no, el add-on prioriza `SUPERVISOR_TOKEN` y solo cae a `home_assistant_token` como último recurso.
+`mcp_server_url` es la única opción MCP obligatoria para Home Assistant. Si rellenas `mcp_server_api_key`, se usa esa. Si no hay `SUPERVISOR_TOKEN` en la sesión, el add-on cae automáticamente a `http://homeassistant:8123/api/mcp` y usa `home_assistant_token`.
 
 ## Helpers
 

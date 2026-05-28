@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.25
+
+- Si `SUPERVISOR_TOKEN` no está disponible, `ha-api` usa la API directa de Home Assistant en `http://homeassistant:8123/api`.
+- `remote-home-assistant` cae automáticamente a `http://homeassistant:8123/api/mcp` cuando no hay `SUPERVISOR_TOKEN`.
+
 ## 0.1.24
 
 - `ha-api` y `remote-home-assistant` priorizan `SUPERVISOR_TOKEN` para el proxy interno `http://supervisor/core/api`.

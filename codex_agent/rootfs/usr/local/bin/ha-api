@@ -4,14 +4,16 @@ set -Eeuo pipefail
 METHOD="${1:-GET}"
 PATH_PART="${2:-/}"
 BODY="${3:-}"
-TOKEN="${SUPERVISOR_TOKEN:-${HOME_ASSISTANT_TOKEN:-${HA_LONG_LIVED_TOKEN:-}}}"
+if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
+  BASE_URL="http://supervisor/core/api"
+  TOKEN="${SUPERVISOR_TOKEN}"
+else
+  BASE_URL="http://homeassistant:8123/api"
+  TOKEN="${HOME_ASSISTANT_TOKEN:-${HA_LONG_LIVED_TOKEN:-}}"
+fi
 
 if [[ -z "$TOKEN" && -r /data/options.json ]]; then
   TOKEN="$(jq -r '.home_assistant_token // .ha_long_lived_token // ""' /data/options.json)"
-
-  if [[ -z "$TOKEN" ]]; then
-    TOKEN="${SUPERVISOR_TOKEN:-}"
-  fi
 fi
 
 if [[ -z "$TOKEN" ]]; then
@@ -19,7 +21,7 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-URL="http://supervisor/core/api${PATH_PART}"
+URL="${BASE_URL}${PATH_PART}"
 
 if [[ -n "$BODY" ]]; then
   curl -fsS -X "$METHOD" \
