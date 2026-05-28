@@ -120,10 +120,10 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
     --client-option disableLeaveAlert=true \
     /bin/bash /usr/local/bin/web-terminal.sh
-  } >>/data/logs/web-terminal.log 2>&1 &
+  } >>/share/codex-agent/web-terminal.log 2>&1 &
 fi
 
-cat >/data/README-runtime.txt <<EOF
+cat >/share/codex-agent/runtime.txt <<EOF
 Codex Agent runtime
 
 Workspace: ${WORKSPACE}

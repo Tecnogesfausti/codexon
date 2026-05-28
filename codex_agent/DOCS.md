@@ -108,7 +108,7 @@ host-shell
 
 `host-shell` usa `nsenter` contra el proceso 1 del host. Requiere que la instalación respete `host_pid: true` y los privilegios declarados por el add-on. Es la vía para inspección avanzada del sistema cuando los montajes estándar de Home Assistant no bastan.
 
-El arranque del panel web escribe en `/data/logs/web-terminal.log`. Si la pantalla sale en blanco, ese archivo es el primer sitio donde mirar.
+El arranque del panel web escribe en `/share/codex-agent/web-terminal.log` y deja un resumen en `/share/codex-agent/runtime.txt`. Si la pantalla sale en blanco, ese archivo es el primer sitio donde mirar desde File Browser o desde otro PC.
 
 ## SSH opcional
 

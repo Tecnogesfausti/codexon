@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.17
+
+- El panel web escribe logs y runtime en `/share/codex-agent/` para poder leerlos desde File Browser o desde otro PC.
+
 ## 0.1.16
 
 - Añadido `web-terminal.sh` con trazas a `/data/logs/web-terminal.log`.
