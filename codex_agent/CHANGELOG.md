@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.19
+
+- La terminal web duplica la salida con `tee`, así se ve en pantalla y también queda en el log.
+
 ## 0.1.18
 
 - Eliminadas opciones no soportadas por `ttyd 1.7.7` (`--reconnect`).
