@@ -109,6 +109,8 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
   ttyd \
     --port 8099 \
     --interface 0.0.0.0 \
+    --reconnect 30 \
+    --ping-interval 2 \
     --writable \
     --terminal-type xterm-256color \
     --client-option titleFixed="Codex Agent" \

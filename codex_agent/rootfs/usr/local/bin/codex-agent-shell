@@ -17,6 +17,10 @@ fi
 
 cd "$WORKSPACE"
 
+if ! tmux has-session -t codex-agent 2>/dev/null; then
+  tmux new-session -d -s codex-agent /bin/bash -l
+fi
+
 cat <<'EOF'
 Codex Agent terminal
 
@@ -30,4 +34,4 @@ Useful commands:
 
 EOF
 
-exec /bin/bash -l
+exec tmux attach -t codex-agent

@@ -108,6 +108,8 @@ host-shell
 
 `host-shell` usa `nsenter` contra el proceso 1 del host. Requiere que la instalación respete `host_pid: true` y los privilegios declarados por el add-on. Es la vía para inspección avanzada del sistema cuando los montajes estándar de Home Assistant no bastan.
 
+La terminal web está montada sobre `tmux`, así que una desconexión del navegador no debería matar la shell ni la sesión de Codex.
+
 ## SSH opcional
 
 El acceso principal es el panel lateral por Ingress. SSH queda como acceso alternativo: activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.

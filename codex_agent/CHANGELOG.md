@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.10
+
+- El panel web usa `tmux` como backend para resistir desconexiones.
+- `ttyd` arranca con `--reconnect 30` y `--ping-interval 2` para reducir cortes de websocket.
+
 ## 0.1.9
 
 - Migrado el registro MCP al comando `codex mcp add`, que es lo que Codex CLI usa de verdad.
