@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.21
+
+- `remote-home-assistant` ahora reutiliza `home_assistant_token` como fallback de autenticación.
+- Evita tener que duplicar el mismo token en dos campos distintos.
+
 ## 0.1.20
 
 - Cambiada la grabación del terminal web de `tee` a `script -f -a` para conservar un TTY real.

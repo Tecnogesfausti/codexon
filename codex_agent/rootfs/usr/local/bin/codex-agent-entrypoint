@@ -55,6 +55,9 @@ else
   export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
 fi
 
+MCP_AUTH_TOKEN="${MCP_SERVER_API_KEY:-${HA_TOKEN:-}}"
+export MCP_AUTH_TOKEN
+
 cat > "$CODEX_HOME/config.toml" <<'EOF'
 cli_auth_credentials_store = "file"
 EOF
@@ -88,9 +91,8 @@ if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
   ensure_mcp_server ha-config -- npx -y @modelcontextprotocol/server-filesystem /ha_config /addon_config /all_addon_configs /addons /share
   ensure_mcp_server memory -- npx -y @modelcontextprotocol/server-memory
   if [[ -n "$MCP_SERVER_URL" ]]; then
-    if [[ -n "$MCP_SERVER_API_KEY" ]]; then
-      export MCP_SERVER_API_KEY
-      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL" --bearer-token-env-var MCP_SERVER_API_KEY
+    if [[ -n "$MCP_AUTH_TOKEN" ]]; then
+      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL" --bearer-token-env-var MCP_AUTH_TOKEN
     else
       ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL"
     fi
