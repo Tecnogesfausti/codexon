@@ -25,6 +25,7 @@ WORKSPACE="$(read_option workspace /ha_config)"
 REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
 INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
 SSH_ENABLED="$(read_bool ssh_enabled)"
+WEB_TERMINAL_ENABLED="$(read_bool web_terminal_enabled)"
 
 if [[ -n "$OPENAI_API_KEY" ]]; then
   export OPENAI_API_KEY
@@ -38,6 +39,7 @@ export MCP_SERVER_API_KEY
 export CODEX_MODEL
 export CODEX_HOME
 export WORKSPACE
+export WEB_TERMINAL_ENABLED
 export HOME="$CODEX_HOME"
 export HA_URL="http://supervisor/core/api"
 export SUPERVISOR_URL="http://supervisor"
@@ -124,6 +126,17 @@ if [[ "$SSH_ENABLED" == "true" ]]; then
   /usr/sbin/sshd -D -p 2222 &
 fi
 
+if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
+  ttyd \
+    --port 8099 \
+    --interface 0.0.0.0 \
+    --writable \
+    --terminal-type xterm-256color \
+    --client-option titleFixed="Codex Agent" \
+    --client-option disableLeaveAlert=true \
+    /usr/local/bin/codex-agent-shell &
+fi
+
 cat >/data/README-runtime.txt <<EOF
 Codex Agent runtime
 
@@ -135,6 +148,7 @@ Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes";
 MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
 
 Useful commands:
+  Open the Codex Agent sidebar panel for a web terminal.
   codex-login-chatgpt
   codex --model "${CODEX_MODEL}" "${WORKSPACE}"
   ha-states
@@ -148,6 +162,7 @@ EOF
 echo "[codex-agent] ready"
 echo "[codex-agent] workspace: ${WORKSPACE}"
 echo "[codex-agent] require_confirmation: ${REQUIRE_CONFIRMATION}"
+echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} on ingress port 8099"
 echo "[codex-agent] start a shell with: docker exec -it <container> bash"
 
 tail -f /dev/null

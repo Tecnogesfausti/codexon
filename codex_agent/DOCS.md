@@ -2,6 +2,20 @@
 
 Codex Agent ejecuta Codex CLI dentro de Home Assistant como add-on con permisos amplios. Está orientado a administrar configuración, add-ons locales, carpetas compartidas y servicios accesibles mediante Supervisor.
 
+## Panel lateral
+
+El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Codex Agent**, igual que otros terminales web. El panel abre una terminal `ttyd` dentro del contenedor en el workspace configurado.
+
+Desde ese panel puedes ejecutar:
+
+```sh
+codex-login-chatgpt
+codex /ha_config
+ha-states
+ha-services
+host-shell
+```
+
 ## Qué monta
 
 - `/ha_config`: configuración de Home Assistant.
@@ -101,7 +115,7 @@ host-shell
 
 ## SSH opcional
 
-Activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.
+El acceso principal es el panel lateral por Ingress. SSH queda como acceso alternativo: activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.
 
 Una vez dentro:
 

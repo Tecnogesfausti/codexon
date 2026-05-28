@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.1.2"
+version: "0.1.3"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
@@ -10,9 +10,12 @@ startup: services
 boot: manual
 init: false
 stage: experimental
-ingress: false
+ingress: true
+ingress_port: 8099
+ingress_stream: true
 panel_icon: mdi:robot
 panel_title: Codex Agent
+panel_admin: true
 homeassistant_api: true
 hassio_api: true
 hassio_role: admin
@@ -76,6 +79,7 @@ options:
   codex_model: "gpt-5.3-codex"
   codex_home: "/data/codex"
   workspace: "/ha_config"
+  web_terminal_enabled: true
   require_confirmation: true
   install_mcp_servers: true
   mcp_config: {}
@@ -91,6 +95,7 @@ schema:
   codex_model: "str"
   codex_home: "str"
   workspace: "str"
+  web_terminal_enabled: "bool"
   require_confirmation: "bool"
   install_mcp_servers: "bool"
   mcp_config: "dict?"

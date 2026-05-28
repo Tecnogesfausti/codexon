@@ -26,6 +26,9 @@ configuration:
   workspace:
     name: Workspace
     description: Default directory where Codex should work.
+  web_terminal_enabled:
+    name: Web terminal enabled
+    description: Enable the Home Assistant sidebar terminal through Ingress.
   require_confirmation:
     name: Require confirmation
     description: Keep manual confirmation enabled for agent actions.

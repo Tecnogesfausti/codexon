@@ -41,6 +41,7 @@ RUN apt-get update \
     shellcheck \
     sudo \
     tmux \
+    ttyd \
     unzip \
     util-linux \
     vim-tiny \
@@ -53,6 +54,7 @@ RUN apt-get update \
 COPY rootfs/ /
 RUN chmod +x \
   /usr/local/bin/codex-agent-entrypoint \
+  /usr/local/bin/codex-agent-shell \
   /usr/local/bin/codex-login-chatgpt \
   /usr/local/bin/ha-api \
   /usr/local/bin/ha-call-service \

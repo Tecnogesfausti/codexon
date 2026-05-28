@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Añadido panel lateral por Home Assistant Ingress.
+- Añadida terminal web `ttyd` en el puerto interno `8099`.
+- Añadido wrapper `codex-agent-shell` para abrir la terminal en el workspace configurado.
+- SSH queda como acceso alternativo opcional.
+
 ## 0.1.2
 
 - Documentado flujo principal con inicio de sesión ChatGPT/Codex en vez de API key.
