@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.26
+
+- Añadido ESPHome CLI al build del add-on mediante un entorno virtual en `/opt/esphome`.
+- Añadido `esphome-version-check` para avisar al arrancar si PyPI publica una versión más nueva.
+
 ## 0.1.25
 
 - Si `SUPERVISOR_TOKEN` no está disponible, `ha-api` usa la API directa de Home Assistant en `http://homeassistant:8123/api`.

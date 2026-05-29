@@ -5,6 +5,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG BUILD_ARCH=amd64
 ARG BUILD_VERSION=0.1.7
 ARG CODEX_NPM_PACKAGE="@openai/codex"
+ARG ESPHOME_PIP_PACKAGE="esphome"
 
 LABEL \
   io.hass.name="Codex Agent" \
@@ -46,6 +47,10 @@ RUN apt-get update \
     yq \
   && npm install -g "${CODEX_NPM_PACKAGE}" \
   && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
+  && python3 -m venv /opt/esphome \
+  && /opt/esphome/bin/pip install --no-cache-dir --upgrade pip wheel \
+  && /opt/esphome/bin/pip install --no-cache-dir "${ESPHOME_PIP_PACKAGE}" \
+  && ln -sf /opt/esphome/bin/esphome /usr/local/bin/esphome \
   && case "${BUILD_ARCH}" in \
       amd64) TTYD_ARCH="x86_64" ;; \
       aarch64) TTYD_ARCH="aarch64" ;; \
@@ -61,6 +66,7 @@ RUN chmod +x \
   /usr/local/bin/codex-agent-entrypoint \
   /usr/local/bin/codex-agent-shell \
   /usr/local/bin/codex-login-chatgpt \
+  /usr/local/bin/esphome-version-check \
   /usr/local/bin/ha-api \
   /usr/local/bin/ha-call-service \
   /usr/local/bin/ha-services \

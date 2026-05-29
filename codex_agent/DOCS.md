@@ -85,7 +85,7 @@ Si `install_mcp_servers` está activo, el arranque registra servidores MCP con `
 
 ## Helpers
 
-El add-on incluye dos comandos:
+El add-on incluye estos comandos:
 
 ```sh
 ha-api GET /config
@@ -93,6 +93,8 @@ ha-states
 ha-services
 ha-call-service light turn_on '{"entity_id":"light.example"}'
 supervisor-api GET /addons
+esphome version
+esphome-version-check
 host-shell
 ```
 
@@ -103,6 +105,8 @@ ha-api POST /services/homeassistant/restart '{}'
 ha-states | grep '^sensor\.'
 ha-services
 supervisor-api GET /addons/core_configurator/info
+esphome-version-check
+esphome version
 host-shell
 ```
 

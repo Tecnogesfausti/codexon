@@ -146,6 +146,7 @@ Supervisor API: ${SUPERVISOR_URL}
 Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes"; else echo "no"; fi)
 MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
 MCP servers: $(codex mcp list 2>/dev/null | tr '\n' '; ' || true)
+ESPHome: $(esphome-version-check 2>/dev/null || true)
 
 Useful commands:
   Open the Codex Agent sidebar panel for a web terminal.
@@ -163,6 +164,7 @@ echo "[codex-agent] ready"
 echo "[codex-agent] workspace: ${WORKSPACE}"
 echo "[codex-agent] require_confirmation: ${REQUIRE_CONFIRMATION}"
 echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} on ingress port 8099"
+esphome-version-check || true
 echo "[codex-agent] start a shell with: docker exec -it <container> bash"
 
 tail -f /dev/null
