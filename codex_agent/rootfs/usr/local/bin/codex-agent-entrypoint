@@ -38,6 +38,8 @@ export MCP_SERVER_URL
 export MCP_SERVER_API_KEY
 export CODEX_MODEL
 export CODEX_HOME
+export PLATFORMIO_CORE_DIR="${PLATFORMIO_CORE_DIR:-$CODEX_HOME/platformio}"
+export PLATFORMIO_PACKAGES_DIR="${PLATFORMIO_PACKAGES_DIR:-$PLATFORMIO_CORE_DIR/packages}"
 export WORKSPACE
 export WEB_TERMINAL_ENABLED
 export HOME="$CODEX_HOME"
@@ -48,7 +50,7 @@ else
 fi
 export SUPERVISOR_URL="http://supervisor"
 
-mkdir -p "$CODEX_HOME" "$WORKSPACE" /data/logs /data/mcp /run/sshd
+mkdir -p "$CODEX_HOME" "$WORKSPACE" "$PLATFORMIO_CORE_DIR" "$PLATFORMIO_PACKAGES_DIR" /data/logs /data/mcp /run/sshd
 chmod 700 "$CODEX_HOME"
 
 if [[ -n "$HOME_ASSISTANT_TOKEN" ]]; then
@@ -141,6 +143,7 @@ Codex Agent runtime
 
 Workspace: ${WORKSPACE}
 Codex home: ${CODEX_HOME}
+PlatformIO core: ${PLATFORMIO_CORE_DIR}
 Home Assistant API: ${HA_URL}
 Supervisor API: ${SUPERVISOR_URL}
 Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes"; else echo "no"; fi)

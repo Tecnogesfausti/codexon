@@ -18,7 +18,9 @@ ENV \
   LANG=C.UTF-8 \
   LC_ALL=C.UTF-8 \
   NODE_ENV=production \
-  CODEX_HOME=/data/codex
+  CODEX_HOME=/data/codex \
+  PLATFORMIO_CORE_DIR=/data/codex/platformio \
+  PLATFORMIO_PACKAGES_DIR=/data/codex/platformio/packages
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \

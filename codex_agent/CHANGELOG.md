@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.27
+
+- PlatformIO usa `/data/codex/platformio` como caché persistente para compilaciones ESPHome.
+- Exportadas `PLATFORMIO_CORE_DIR` y `PLATFORMIO_PACKAGES_DIR` para evitar fallback a `/tmp`.
+
 ## 0.1.26
 
 - Añadido ESPHome CLI al build del add-on mediante un entorno virtual en `/opt/esphome`.
