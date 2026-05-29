@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.28
+
+- La terminal web vuelve a adjuntar a una sesión persistente `tmux` llamada `codex-agent`.
+- Al reconectar desde el panel lateral, se recupera la misma shell en vez de arrancar otra sesión.
+
 ## 0.1.27
 
 - PlatformIO usa `/data/codex/platformio` como caché persistente para compilaciones ESPHome.

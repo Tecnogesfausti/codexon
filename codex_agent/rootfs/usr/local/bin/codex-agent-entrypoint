@@ -134,7 +134,7 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
       --client-option cursorStyle=bar \
       --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
       --client-option disableLeaveAlert=true \
-      script -q -f -a /share/codex-agent/web-terminal.log -c "/bin/bash /usr/local/bin/web-terminal.sh"
+      /bin/bash /usr/local/bin/web-terminal.sh
   } >>/share/codex-agent/web-terminal.log 2>&1 &
 fi
 
