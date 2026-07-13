@@ -12,7 +12,10 @@ Comandos principales:
       Abre Codex para modificar, enseñar, corregir y ampliar SegurAI o Home Assistant.
 
   segurai-console
-      Abre el prompt interactivo del servicio SegurAI: estado, tareas, agentes, logs y contexto.
+      Controla el servicio SegurAI: estado, tareas, agentes, logs y contexto.
+
+  segurai-chat
+      Abre el chat completo de segurai.py con memoria, MCP y herramientas.
 
 Ayuda rapida:
   tail -f /data/segurai/segurai-service.log

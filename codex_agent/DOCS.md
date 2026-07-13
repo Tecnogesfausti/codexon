@@ -163,6 +163,15 @@ Comandos útiles dentro del prompt:
 
 `segurai-console` habla con la API web local de SegurAI en `8098` o `8099`, según `ingress_target`.
 
+Para conversar con el SegurAI completo, usando `segurai.py` real, memoria, MCP y herramientas:
+
+```sh
+segurai-chat
+```
+
+`segurai-chat` usa bloqueo para evitar dos sesiones simultáneas y siempre arranca con `--no-sensor-loop`, de modo que no duplica los observadores 24/7 del servicio.
+
+
 Al abrir la terminal aparece un banner con los dos caminos principales: `codex --model "$CODEX_MODEL" "$WORKSPACE"` para trabajar sobre código y `segurai-console` para operar el servicio.
 
 

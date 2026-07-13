@@ -86,6 +86,7 @@ RUN chmod +x \
   /usr/local/bin/web-terminal.sh \
   /usr/local/bin/supervisor-api \
   /usr/local/bin/segurai-console \
+  /usr/local/bin/segurai-chat \
   /etc/profile.d/codex-segurai-welcome.sh
 
 CMD ["/usr/local/bin/codex-agent-entrypoint"]

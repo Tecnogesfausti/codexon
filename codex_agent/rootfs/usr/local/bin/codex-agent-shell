@@ -25,7 +25,10 @@ Comandos principales:
       Modificar, enseñar, corregir y ampliar SegurAI o Home Assistant.
 
   segurai-console
-      Prompt interactivo del servicio SegurAI: estado, tareas, agentes, logs y contexto.
+      Control del servicio SegurAI: estado, tareas, agentes, logs y contexto.
+
+  segurai-chat
+      Chat completo de segurai.py con memoria, MCP y herramientas.
 
 Otros comandos utiles:
   codex-login-chatgpt

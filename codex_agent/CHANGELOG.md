@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.33
+
+- Añadido `segurai-chat`, wrapper seguro para abrir el `segurai.py` completo desde la terminal Codex.
+- `segurai-chat` reutiliza memoria/MCP/OpenRouter, fuerza `--no-sensor-loop` y usa bloqueo para evitar sesiones duplicadas.
+
 ## 0.1.32
 
 - `segurai-console` acepta texto libre en modo chat: crea una tarea inmediata, espera el resultado y lo muestra en el prompt.
