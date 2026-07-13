@@ -175,6 +175,37 @@ segurai-chat
 Al abrir la terminal aparece un banner con los dos caminos principales: `codex --model "$CODEX_MODEL" "$WORKSPACE"` para trabajar sobre código y `segurai-console` para operar el servicio.
 
 
+
+### Enseñar y corregir SegurAI con Codex
+
+Cuando SegurAI responda mal o use una herramienta de forma incorrecta, desde `segurai-console` puedes guardar la última interacción como lección:
+
+```text
+/ensenar Debe resolver nombres parciales de entidades HA antes de consultar historico
+```
+
+Si quieres abrir Codex directamente para corregir código:
+
+```text
+/corregir Debe resolver sensor ITORRE692 a sensor.itorre692_temperature
+```
+
+También puedes hacerlo desde la shell:
+
+```sh
+segurai-teach "Corrige la consulta historica de temperatura alrededor de una hora"
+```
+
+Esto crea:
+
+```text
+/data/segurai/teach/latest.md
+/data/segurai/teach/lessons.jsonl
+/data/segurai/CODEX_NOTES.md
+```
+
+Codex debe revisar `latest.md`, tocar `/data/segurai/app`, ejecutar pruebas si existen y explicar el cambio. Los fallos quedan etiquetados con clases como `ERROR_TIMEOUT`, `ERROR_TASK_FAILED` o `USER_TEACHING`.
+
 ## SSH opcional
 
 El acceso principal es el panel lateral por Ingress. SSH queda como acceso alternativo: activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.

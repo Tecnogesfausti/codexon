@@ -17,6 +17,9 @@ Comandos principales:
   segurai-chat
       Abre el chat completo de segurai.py con memoria, MCP y herramientas.
 
+  segurai-teach "tema a corregir"
+      Registra una leccion para que Codex corrija SegurAI.
+
 Ayuda rapida:
   tail -f /data/segurai/segurai-service.log
   tail -f /data/segurai/segurai-runtime.log

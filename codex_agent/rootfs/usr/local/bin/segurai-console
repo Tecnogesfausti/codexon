@@ -5,6 +5,7 @@ import cmd
 import datetime as dt
 import json
 import os
+import subprocess
 import time
 import shlex
 import sys
@@ -21,6 +22,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_URLS = ("http://127.0.0.1:8098", "http://127.0.0.1:8099")
 HISTORY_PATH = Path(os.getenv("SEGURAI_CONSOLE_HISTORY", "/data/segurai/segurai-console-history"))
+LAST_INTERACTION_PATH = Path(os.getenv("SEGURAI_LAST_INTERACTION", "/data/segurai/last-console-interaction.json"))
 
 
 def utc_now() -> str:
@@ -68,6 +70,24 @@ class SegurAIClient:
 
     def delete(self, path: str) -> Any:
         return self.request("DELETE", path)
+
+
+def save_last_interaction(record: dict[str, Any]) -> None:
+    LAST_INTERACTION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAST_INTERACTION_PATH.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def error_class_for_task(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "ERROR_TIMEOUT"
+    status = str(row.get("status") or "")
+    if status == "done":
+        return "OK"
+    if status == "failed":
+        return "ERROR_TASK_FAILED"
+    if status == "cancelled":
+        return "ERROR_TASK_CANCELLED"
+    return f"TASK_STATUS_{status.upper() or 'UNKNOWN'}"
 
 
 def print_table(rows: list[dict[str, Any]], columns: list[str], limit: int = 80) -> None:
@@ -147,16 +167,25 @@ class SegurAIConsole(cmd.Cmd):
         task_id = int(result.get("id"))
         print(f"Tarea chat #{task_id} enviada. Esperando resultado...")
         final = self.wait_task(task_id, timeout_seconds=90)
+        record = {
+            "created_at": utc_now(),
+            "kind": "chat",
+            "instruction": instruction,
+            "task_id": task_id,
+            "final": final,
+            "error_class": error_class_for_task(final),
+        }
+        save_last_interaction(record)
         if final is None:
-            print(f"Sigue en curso. Mira /tareas o /logs. ID: {task_id}")
+            print(f"[ERROR_TIMEOUT] Sigue en curso. Mira /tareas o /logs. ID: {task_id}")
             return
         status = final.get("status")
         if status == "done":
             print(final.get("result") or "Tarea completada sin texto de resultado.")
         elif status == "failed":
-            print(f"Error en tarea #{task_id}: {final.get('last_error') or 'sin detalle'}")
+            print(f"[ERROR_TASK_FAILED] Error en tarea #{task_id}: {final.get('last_error') or 'sin detalle'}")
         else:
-            print(f"Tarea #{task_id}: {status}")
+            print(f"[{record['error_class']}] Tarea #{task_id}: {status}")
 
     def wait_task(self, task_id: int, timeout_seconds: int = 90) -> dict[str, Any] | None:
         deadline = time.monotonic() + timeout_seconds
@@ -189,6 +218,8 @@ class SegurAIConsole(cmd.Cmd):
               /agente <nombre>                 Ejecuta agente manualmente
               /observaciones                   Ultimas observaciones
               /contexto                        Refresca contexto Codex
+              /ensenar <tema>                  Registra la ultima interaccion para que Codex corrija SegurAI
+              /corregir <tema>                 Igual que /ensenar, pero abre Codex directamente
               /url [url]                       Muestra o cambia API URL
               /salir                           Salir
             """
@@ -251,6 +282,15 @@ class SegurAIConsole(cmd.Cmd):
     def do_contexto(self, arg: str) -> None:  # noqa: ARG002
         result = self.client.post("/api/codex/context/refresh")
         print(f"Contexto actualizado: {result.get('path')}")
+
+
+    def do_ensenar(self, arg: str) -> None:
+        topic = arg.strip() or "Corrige la ultima respuesta de SegurAI"
+        subprocess.run(["segurai-teach", "--error-class", "USER_TEACHING", topic], check=False)
+
+    def do_corregir(self, arg: str) -> None:
+        topic = arg.strip() or "Corrige la ultima respuesta de SegurAI"
+        subprocess.run(["segurai-teach", "--error-class", "USER_TEACHING", "--codex", topic], check=False)
 
     def do_url(self, arg: str) -> None:
         value = arg.strip()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.34
+
+- Añadido `segurai-teach` para registrar errores/lecciones y preparar contexto de corrección para Codex.
+- `segurai-console` guarda la última interacción, etiqueta errores (`ERROR_TIMEOUT`, `ERROR_TASK_FAILED`, `USER_TEACHING`) y añade `/ensenar` y `/corregir`.
+
 ## 0.1.33
 
 - Añadido `segurai-chat`, wrapper seguro para abrir el `segurai.py` completo desde la terminal Codex.

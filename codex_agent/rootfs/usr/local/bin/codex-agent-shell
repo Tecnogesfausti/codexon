@@ -30,6 +30,9 @@ Comandos principales:
   segurai-chat
       Chat completo de segurai.py con memoria, MCP y herramientas.
 
+  segurai-teach "tema a corregir"
+      Registra una leccion para que Codex corrija SegurAI.
+
 Otros comandos utiles:
   codex-login-chatgpt
   ha-states
