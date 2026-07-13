@@ -138,6 +138,27 @@ tail -f /data/segurai/segurai-runtime.log
 ```
 
 El botón Ingress del add-on siempre entra por `8099`, pero `ingress_target` decide qué se ve tras reiniciar: `codex` deja la terminal en el botón y SegurAI web en `8098`; `segurai` pone SegurAI web en el botón y mueve la terminal Codex a `8098`. En ese modo la web de SegurAI arranca aunque `segurai_web_enabled` esté en `false`.
+Desde la terminal Codex puedes controlar el servicio real sin arrancar otro `segurai.py`:
+
+```sh
+segurai-console
+```
+
+La consola usa historial y flecha arriba. Comandos útiles dentro del prompt:
+
+```text
+/estado
+/tareas
+/crear Probar fichero | Escribe 100 veces no memarees en mareo.txt
+/agentes
+/logs 120
+/salir
+```
+
+`segurai-console` habla con la API web local de SegurAI en `8098` o `8099`, según `ingress_target`.
+
+Al abrir la terminal aparece un banner con los dos caminos principales: `codex --model "$CODEX_MODEL" "$WORKSPACE"` para trabajar sobre código y `segurai-console` para operar el servicio.
+
 
 ## SSH opcional
 

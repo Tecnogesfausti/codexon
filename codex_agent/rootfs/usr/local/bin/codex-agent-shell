@@ -20,9 +20,15 @@ cd "$WORKSPACE"
 cat <<'EOF'
 Codex Agent terminal
 
-Useful commands:
+Comandos principales:
+  codex --model "$CODEX_MODEL" "$WORKSPACE"
+      Modificar, enseñar, corregir y ampliar SegurAI o Home Assistant.
+
+  segurai-console
+      Prompt interactivo del servicio SegurAI: estado, tareas, agentes, logs y contexto.
+
+Otros comandos utiles:
   codex-login-chatgpt
-  codex /ha_config
   ha-states
   ha-services
   supervisor-api GET /addons

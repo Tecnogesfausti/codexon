@@ -84,6 +84,8 @@ RUN chmod +x \
   /usr/local/bin/ha-states \
   /usr/local/bin/host-shell \
   /usr/local/bin/web-terminal.sh \
-  /usr/local/bin/supervisor-api
+  /usr/local/bin/supervisor-api \
+  /usr/local/bin/segurai-console \
+  /etc/profile.d/codex-segurai-welcome.sh
 
 CMD ["/usr/local/bin/codex-agent-entrypoint"]

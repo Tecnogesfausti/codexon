@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.31
+
+- Añadido `segurai-console`, un prompt interactivo con historial para controlar el servicio SegurAI desde la terminal Codex.
+- Permite consultar estado, logs, tareas, agentes y crear tareas hablando con la API web local de SegurAI.
+- Añadido banner de bienvenida en la terminal con los comandos principales `codex` y `segurai-console`.
+
 ## 0.1.30
 
 - Añadida opción `ingress_target` para alternar el botón Ingress entre terminal Codex y panel web SegurAI tras reiniciar.
