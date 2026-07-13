@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.1.28"
+version: "0.1.29"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
@@ -67,10 +67,13 @@ map:
     path: /ssl
 ports:
   2222/tcp: null
+  8098/tcp: null
 ports_description:
   2222/tcp: Optional SSH access to the agent container
+  8098/tcp: Optional SegurAI web panel when segurai_web_enabled is true
 options:
   openai_api_key: ""
+  openrouter_api_key: ""
   home_assistant_token: ""
   ha_long_lived_token: ""
   mcp_server_url: ""
@@ -83,8 +86,16 @@ options:
   install_mcp_servers: true
   ssh_enabled: false
   ssh_public_keys: []
+  segurai_enabled: false
+  segurai_web_enabled: false
+  segurai_poll_seconds: 300
+  segurai_sensor_prompt: "Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen."
+  segurai_fs_roots: "/ha_config,/addon_config,/share"
+  segurai_no_sensor_loop: false
+  segurai_allow_actions_without_confirmation: false
 schema:
   openai_api_key: "password?"
+  openrouter_api_key: "password?"
   home_assistant_token: "password?"
   ha_long_lived_token: "password?"
   mcp_server_url: "str?"
@@ -98,3 +109,10 @@ schema:
   ssh_enabled: "bool"
   ssh_public_keys:
     - "str"
+  segurai_enabled: "bool"
+  segurai_web_enabled: "bool"
+  segurai_poll_seconds: "int(30,86400)"
+  segurai_sensor_prompt: "str"
+  segurai_fs_roots: "str"
+  segurai_no_sensor_loop: "bool"
+  segurai_allow_actions_without_confirmation: "bool"

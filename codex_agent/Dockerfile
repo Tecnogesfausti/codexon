@@ -6,6 +6,8 @@ ARG BUILD_ARCH=amd64
 ARG BUILD_VERSION=0.1.7
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG ESPHOME_PIP_PACKAGE="esphome"
+ARG SEGURAI_REPO="https://github.com/Tecnogesfausti/SegurAI.git"
+ARG SEGURAI_REF="main"
 
 LABEL \
   io.hass.name="Codex Agent" \
@@ -53,6 +55,13 @@ RUN apt-get update \
   && /opt/esphome/bin/pip install --no-cache-dir --upgrade pip wheel \
   && /opt/esphome/bin/pip install --no-cache-dir "${ESPHOME_PIP_PACKAGE}" \
   && ln -sf /opt/esphome/bin/esphome /usr/local/bin/esphome \
+  && git clone --depth 1 --branch "${SEGURAI_REF}" "${SEGURAI_REPO}" /opt/segurai-src \
+  && python3 -m venv /opt/segurai \
+  && /opt/segurai/bin/pip install --no-cache-dir --upgrade pip wheel \
+  && /opt/segurai/bin/pip install --no-cache-dir -r /opt/segurai-src/requirements.txt \
+  && mkdir -p /opt/segurai/app \
+  && rsync -a --delete /opt/segurai-src/ /opt/segurai/app/ \
+  && rm -rf /opt/segurai-src \
   && case "${BUILD_ARCH}" in \
       amd64) TTYD_ARCH="x86_64" ;; \
       aarch64) TTYD_ARCH="aarch64" ;; \

@@ -2,6 +2,9 @@ configuration:
   openai_api_key:
     name: OpenAI API key
     description: Optional API key used by Codex CLI.
+  openrouter_api_key:
+    name: OpenRouter API key
+    description: Optional API key used by the embedded SegurAI service.
   ha_long_lived_token:
     name: Home Assistant long-lived token legacy alias
     description: Deprecated alias for home_assistant_token.
@@ -38,3 +41,25 @@ configuration:
   ssh_public_keys:
     name: SSH public keys
     description: Public keys allowed to access the agent container.
+
+  segurai_enabled:
+    name: SegurAI service enabled
+    description: Start SegurAI as a background 24/7 service inside this Codex add-on.
+  segurai_web_enabled:
+    name: SegurAI web panel enabled
+    description: Expose the optional SegurAI web panel on direct port 8098.
+  segurai_poll_seconds:
+    name: SegurAI poll seconds
+    description: Sensor polling interval for the SegurAI service.
+  segurai_sensor_prompt:
+    name: SegurAI sensor prompt
+    description: Prompt used by SegurAI for periodic sensor observation.
+  segurai_fs_roots:
+    name: SegurAI filesystem roots
+    description: Comma-separated writable/readable roots available to SegurAI tools.
+  segurai_no_sensor_loop:
+    name: Disable SegurAI sensor loop
+    description: Start SegurAI without the periodic sensor loop.
+  segurai_allow_actions_without_confirmation:
+    name: Allow SegurAI actions without confirmation
+    description: Permit SegurAI to execute actions without explicit confirmation. Use with care.

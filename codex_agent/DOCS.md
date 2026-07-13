@@ -114,6 +114,30 @@ host-shell
 
 El arranque del panel web escribe en `/share/codex-agent/web-terminal.log` y deja un resumen en `/share/codex-agent/runtime.txt`. Si la pantalla sale en blanco, ese archivo es el primer sitio donde mirar desde File Browser o desde otro PC.
 
+
+## SegurAI opcional
+
+El add-on puede arrancar SegurAI como servicio 24/7 sin tocar la terminal Codex. La terminal lateral sigue siendo `ttyd + tmux` en Ingress `8099`; SegurAI se copia a `/data/segurai/app` en el primer arranque y se ejecuta desde esa ruta para que Codex pueda modificarlo de forma persistente.
+
+Opciones principales:
+
+```yaml
+openrouter_api_key: "sk-or-..."
+segurai_enabled: true
+segurai_web_enabled: false
+segurai_poll_seconds: 300
+segurai_fs_roots: "/ha_config,/addon_config,/share"
+```
+
+Logs:
+
+```sh
+tail -f /data/segurai/segurai-service.log
+tail -f /data/segurai/segurai-runtime.log
+```
+
+Si `segurai_web_enabled` está activo, el panel web de SegurAI escucha en `8098` como puerto directo; el panel lateral de Codex no cambia.
+
 ## SSH opcional
 
 El acceso principal es el panel lateral por Ingress. SSH queda como acceso alternativo: activa `ssh_enabled` y añade claves públicas en `ssh_public_keys`. El puerto interno es `2222/tcp`; asigna un puerto de host desde la pantalla del add-on si quieres entrar por SSH.

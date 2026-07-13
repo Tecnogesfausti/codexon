@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.29
+
+- Añadido SegurAI como servicio opcional dentro del add-on Codex funcional.
+- La terminal `ttyd + tmux` e Ingress `8099` se mantienen sin cambios.
+- SegurAI se inicializa en `/data/segurai/app` para que Codex pueda modificarlo de forma persistente.
+- Añadido panel web opcional de SegurAI en el puerto directo `8098`.
+
 ## 0.1.28
 
 - La terminal web vuelve a adjuntar a una sesión persistente `tmux` llamada `codex-agent`.
