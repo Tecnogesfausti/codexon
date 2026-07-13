@@ -125,6 +125,7 @@ Opciones principales:
 openrouter_api_key: "sk-or-..."
 segurai_enabled: true
 segurai_web_enabled: false
+ingress_target: "codex"
 segurai_poll_seconds: 300
 segurai_fs_roots: "/ha_config,/addon_config,/share"
 ```
@@ -136,7 +137,7 @@ tail -f /data/segurai/segurai-service.log
 tail -f /data/segurai/segurai-runtime.log
 ```
 
-Si `segurai_web_enabled` está activo, el panel web de SegurAI escucha en `8098` como puerto directo; el panel lateral de Codex no cambia.
+El botón Ingress del add-on siempre entra por `8099`, pero `ingress_target` decide qué se ve tras reiniciar: `codex` deja la terminal en el botón y SegurAI web en `8098`; `segurai` pone SegurAI web en el botón y mueve la terminal Codex a `8098`. En ese modo la web de SegurAI arranca aunque `segurai_web_enabled` esté en `false`.
 
 ## SSH opcional
 

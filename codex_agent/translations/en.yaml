@@ -29,6 +29,9 @@ configuration:
   web_terminal_enabled:
     name: Web terminal enabled
     description: Enable the Home Assistant sidebar terminal through Ingress.
+  ingress_target:
+    name: Ingress target
+    description: Choose codex for the terminal button or segurai for the SegurAI web panel button. Restart the add-on after changing.
   require_confirmation:
     name: Require confirmation
     description: Keep manual confirmation enabled for agent actions.

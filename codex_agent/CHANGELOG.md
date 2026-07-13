@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.30
+
+- Añadida opción `ingress_target` para alternar el botón Ingress entre terminal Codex y panel web SegurAI tras reiniciar.
+- Cuando `ingress_target: "segurai"`, SegurAI web escucha en `8099` y la terminal Codex pasa a `8098`.
+
 ## 0.1.29
 
 - Añadido SegurAI como servicio opcional dentro del add-on Codex funcional.

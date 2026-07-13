@@ -27,6 +27,7 @@ REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
 INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
 SSH_ENABLED="$(read_bool ssh_enabled)"
 WEB_TERMINAL_ENABLED="$(read_bool web_terminal_enabled)"
+INGRESS_TARGET="$(read_option ingress_target codex)"
 SEGURAI_ENABLED="$(read_bool segurai_enabled)"
 SEGURAI_WEB_ENABLED="$(read_bool segurai_web_enabled)"
 SEGURAI_POLL_SECONDS="$(read_option segurai_poll_seconds 300)"
@@ -34,6 +35,17 @@ SEGURAI_SENSOR_PROMPT="$(read_option segurai_sensor_prompt "Consulta sensores de
 SEGURAI_FS_ROOTS="$(read_option segurai_fs_roots /ha_config,/addon_config,/share)"
 SEGURAI_NO_SENSOR_LOOP="$(read_bool segurai_no_sensor_loop)"
 SEGURAI_ALLOW_ACTIONS_WITHOUT_CONFIRMATION="$(read_bool segurai_allow_actions_without_confirmation)"
+
+if [[ "$INGRESS_TARGET" != "segurai" ]]; then
+  INGRESS_TARGET="codex"
+fi
+if [[ "$INGRESS_TARGET" == "segurai" ]]; then
+  CODEX_TERMINAL_PORT=8098
+  SEGURAI_WEB_PORT=8099
+else
+  CODEX_TERMINAL_PORT=8099
+  SEGURAI_WEB_PORT=8098
+fi
 
 if [[ -n "$OPENAI_API_KEY" ]]; then
   export OPENAI_API_KEY
@@ -135,11 +147,6 @@ start_segurai() {
     args+=(--allow-actions-without-confirmation)
   fi
 
-  if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
-    echo "[$(date -Is)] SegurAI disabled: openrouter_api_key is empty" >>/data/segurai/segurai-service.log
-    return 0
-  fi
-
   export HA_MCP_URL="${MCP_SERVER_URL:-http://supervisor/core/api/mcp}"
   export MCP_AUTH_TOKEN
   export MCP_SERVER_API_KEY
@@ -159,16 +166,20 @@ start_segurai() {
   export SEGURAI_SENSOR_PROMPT="$SEGURAI_SENSOR_PROMPT"
   export SEGURAI_FS_ROOTS="$SEGURAI_FS_ROOTS"
 
-  echo "[$(date -Is)] SegurAI service starting with MCP ${HA_MCP_URL}" >>/data/segurai/segurai-service.log
-  (cd /data/segurai/app && /opt/segurai/bin/python segurai.py "${args[@]}") >>/data/segurai/segurai-service.log 2>&1 &
+  if [[ -n "${OPENROUTER_API_KEY:-}" && "$SEGURAI_ENABLED" == "true" ]]; then
+    echo "[$(date -Is)] SegurAI service starting with MCP ${HA_MCP_URL}" >>/data/segurai/segurai-service.log
+    (cd /data/segurai/app && /opt/segurai/bin/python segurai.py "${args[@]}") >>/data/segurai/segurai-service.log 2>&1 &
+  elif [[ "$SEGURAI_ENABLED" == "true" ]]; then
+    echo "[$(date -Is)] SegurAI service disabled: openrouter_api_key is empty" >>/data/segurai/segurai-service.log
+  fi
 
-  if [[ "$SEGURAI_WEB_ENABLED" == "true" ]]; then
-    echo "[$(date -Is)] SegurAI web starting on 8098" >>/data/segurai/segurai-web.log
-    (cd /data/segurai/app && SEGURAI_DATA_DIR=/data/segurai /opt/segurai/bin/python -m uvicorn segurai_web:app --host 0.0.0.0 --port 8098) >>/data/segurai/segurai-web.log 2>&1 &
+  if [[ "$SEGURAI_WEB_ENABLED" == "true" || "$INGRESS_TARGET" == "segurai" ]]; then
+    echo "[$(date -Is)] SegurAI web starting on ${SEGURAI_WEB_PORT}" >>/data/segurai/segurai-web.log
+    (cd /data/segurai/app && SEGURAI_DATA_DIR=/data/segurai /opt/segurai/bin/python -m uvicorn segurai_web:app --host 0.0.0.0 --port "${SEGURAI_WEB_PORT}") >>/data/segurai/segurai-web.log 2>&1 &
   fi
 }
 
-if [[ "$SEGURAI_ENABLED" == "true" ]]; then
+if [[ "$SEGURAI_ENABLED" == "true" || "$SEGURAI_WEB_ENABLED" == "true" || "$INGRESS_TARGET" == "segurai" ]]; then
   start_segurai
 fi
 
@@ -183,9 +194,9 @@ fi
 if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
   mkdir -p /share/codex-agent
   {
-    echo "[$(date -Is)] ttyd starting"
+    echo "[$(date -Is)] ttyd starting on ${CODEX_TERMINAL_PORT}"
     ttyd \
-      --port 8099 \
+      --port "${CODEX_TERMINAL_PORT}" \
       --interface 0.0.0.0 \
       --writable \
       --terminal-type xterm-256color \
@@ -212,6 +223,9 @@ MCP servers: $(codex mcp list 2>/dev/null | tr '\n' '; ' || true)
 SegurAI enabled: ${SEGURAI_ENABLED}
 SegurAI app: /data/segurai/app
 SegurAI logs: /data/segurai/segurai-service.log
+Ingress target: ${INGRESS_TARGET}
+Codex terminal port: ${CODEX_TERMINAL_PORT}
+SegurAI web port: ${SEGURAI_WEB_PORT}
 ESPHome: $(esphome-version-check 2>/dev/null || true)
 
 Useful commands:
@@ -229,8 +243,9 @@ EOF
 echo "[codex-agent] ready"
 echo "[codex-agent] workspace: ${WORKSPACE}"
 echo "[codex-agent] require_confirmation: ${REQUIRE_CONFIRMATION}"
-echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} on ingress port 8099"
-echo "[codex-agent] segurai: ${SEGURAI_ENABLED}"
+echo "[codex-agent] ingress target: ${INGRESS_TARGET}"
+echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} on port ${CODEX_TERMINAL_PORT}"
+echo "[codex-agent] segurai: ${SEGURAI_ENABLED} web port ${SEGURAI_WEB_PORT}"
 esphome-version-check || true
 echo "[codex-agent] start a shell with: docker exec -it <container> bash"
 
