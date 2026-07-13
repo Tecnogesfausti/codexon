@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.32
+
+- `segurai-console` acepta texto libre en modo chat: crea una tarea inmediata, espera el resultado y lo muestra en el prompt.
+
 ## 0.1.31
 
 - Añadido `segurai-console`, un prompt interactivo con historial para controlar el servicio SegurAI desde la terminal Codex.

@@ -5,6 +5,7 @@ import cmd
 import datetime as dt
 import json
 import os
+import time
 import shlex
 import sys
 import textwrap
@@ -133,11 +134,48 @@ class SegurAIConsole(cmd.Cmd):
             if method:
                 method(rest)
                 return
-        print("Comando no reconocido. Usa /help.")
+            print("Comando no reconocido. Usa /help.")
+            return
+        self.chat(line.strip())
+
+    def chat(self, instruction: str) -> None:
+        title = instruction[:72] + ("…" if len(instruction) > 72 else "")
+        result = self.client.post(
+            "/api/tasks",
+            {"title": f"Chat: {title}", "instruction": instruction, "run_at": utc_now(), "priority": 80},
+        )
+        task_id = int(result.get("id"))
+        print(f"Tarea chat #{task_id} enviada. Esperando resultado...")
+        final = self.wait_task(task_id, timeout_seconds=90)
+        if final is None:
+            print(f"Sigue en curso. Mira /tareas o /logs. ID: {task_id}")
+            return
+        status = final.get("status")
+        if status == "done":
+            print(final.get("result") or "Tarea completada sin texto de resultado.")
+        elif status == "failed":
+            print(f"Error en tarea #{task_id}: {final.get('last_error') or 'sin detalle'}")
+        else:
+            print(f"Tarea #{task_id}: {status}")
+
+    def wait_task(self, task_id: int, timeout_seconds: int = 90) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            rows = self.client.get("/api/tasks?limit=80&include_done=true")
+            for row in rows:
+                if int(row.get("id", -1)) == task_id:
+                    if row.get("status") in {"done", "failed", "cancelled"}:
+                        return row
+                    break
+            time.sleep(2)
+        return None
 
     def do_help(self, arg: str) -> None:  # noqa: ARG002
         print(textwrap.dedent(
             """
+            Escribe texto libre para chatear con el servicio SegurAI.
+            Ejemplo: busca retenciones en la A7 cerca de Torrent
+
             Comandos:
               /estado                         Estado del servicio y memoria
               /logs [n]                        Ultimas lineas de log

@@ -144,7 +144,13 @@ Desde la terminal Codex puedes controlar el servicio real sin arrancar otro `seg
 segurai-console
 ```
 
-La consola usa historial y flecha arriba. Comandos útiles dentro del prompt:
+La consola usa historial y flecha arriba. Si escribes texto libre, lo envía al servicio SegurAI como una tarea inmediata y espera el resultado:
+
+```text
+busca retenciones en la A7 cerca de Torrent
+```
+
+Comandos útiles dentro del prompt:
 
 ```text
 /estado
