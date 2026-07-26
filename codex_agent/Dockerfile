@@ -3,7 +3,7 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.1.7
+ARG BUILD_VERSION=0.2.0
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG ESPHOME_PIP_PACKAGE="esphome"
 ARG SEGURAI_REPO="https://github.com/Tecnogesfausti/SegurAI.git"

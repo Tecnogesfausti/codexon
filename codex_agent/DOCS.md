@@ -119,6 +119,15 @@ El arranque del panel web escribe en `/share/codex-agent/web-terminal.log` y dej
 
 El add-on puede arrancar SegurAI como servicio 24/7 sin tocar la terminal Codex. La terminal lateral sigue siendo `ttyd + tmux` en Ingress `8099`; SegurAI se copia a `/data/segurai/app` en el primer arranque y se ejecuta desde esa ruta para que Codex pueda modificarlo de forma persistente.
 
+Cada vivienda debe mantener su contexto fuera del repositorio. Para iniciar un perfil local:
+
+```sh
+cp /data/segurai/app/site.example.yaml /data/segurai/site.yaml
+nano /data/segurai/site.yaml
+```
+
+Define ahí los roles, alias y entidades relevantes de esa instalación. SegurAI también puede descubrir entidades vivas, pero el perfil evita ambigüedades y conserva las decisiones del propietario. No copies perfiles, credenciales ni bases de memoria entre viviendas.
+
 Opciones principales:
 
 ```yaml
@@ -147,7 +156,7 @@ segurai-console
 La consola usa historial y flecha arriba. Si escribes texto libre, lo envía al servicio SegurAI como una tarea inmediata y espera el resultado:
 
 ```text
-busca retenciones en la A7 cerca de Torrent
+busca retenciones cerca de casa
 ```
 
 Comandos útiles dentro del prompt:

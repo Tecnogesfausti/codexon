@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- SegurAI incorpora perfiles locales `site.yaml` para adaptar entidades, alias e instrucciones a cada instalación sin publicar datos privados.
+- Añadido motor versionado de automatizaciones, planificación determinista, scheduler robusto y herramientas ampliadas de Home Assistant.
+- Añadidos historial agregado, TTS y notificaciones, catálogo de memoria, contexto ambiental configurable y soporte opcional para Traccar.
+- Eliminados valores locales de ubicación, coordenadas, dispositivos y contraseñas de los ejemplos distribuibles.
+
 ## 0.1.34
 
 - Añadido `segurai-teach` para registrar errores/lecciones y preparar contexto de corrección para Codex.

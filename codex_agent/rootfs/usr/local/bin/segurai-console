@@ -203,7 +203,7 @@ class SegurAIConsole(cmd.Cmd):
         print(textwrap.dedent(
             """
             Escribe texto libre para chatear con el servicio SegurAI.
-            Ejemplo: busca retenciones en la A7 cerca de Torrent
+            Ejemplo: busca retenciones cerca de casa
 
             Comandos:
               /estado                         Estado del servicio y memoria
