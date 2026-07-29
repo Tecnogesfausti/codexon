@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Fijado SegurAI a MCP 1.x para conservar la API `streamablehttp_client`.
+- Añadida migración con copia de seguridad para actualizar los archivos de ejecución persistentes de SegurAI.
+- Corregido el arranque de la web y del adaptador WhatsApp tras actualizar desde una instalación existente.
+
 ## 0.2.1
 
 - Integrado el núcleo Baileys de HAWhatsUp como servicio interno del add-on Codex Agent.
