@@ -54,9 +54,11 @@ RUN apt-get update \
 
 COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY whatsapp-core/ /opt/codex-agent/whatsapp-core/
 
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+  && npm install --omit=dev --prefix /opt/codex-agent/whatsapp-core \
   && npm install -g "${CODEX_NPM_PACKAGE}" \
   && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
   && python3 -m venv /opt/esphome \
@@ -69,7 +71,6 @@ RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && /opt/segurai/bin/pip install --no-cache-dir -r /opt/segurai-src/requirements.txt \
   && mkdir -p /opt/segurai/app \
   && rsync -a --delete /opt/segurai-src/ /opt/segurai/app/ \
-  && npm install --omit=dev --prefix /opt/segurai/app/whatsapp-core \
   && rm -rf /opt/segurai-src \
   && case "${BUILD_ARCH}" in \
       amd64) TTYD_ARCH="x86_64" ;; \

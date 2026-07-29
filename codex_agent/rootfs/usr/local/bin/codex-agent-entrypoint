@@ -177,7 +177,7 @@ start_segurai() {
   export SEGURAI_WHATSAPP_ALLOW_GROUPS
   export SEGURAI_WHATSAPP_REJECT_CALLS=true
   export SEGURAI_WHATSAPP_DATA_DIR=/data/segurai/whatsapp
-  export SEGURAI_WHATSAPP_BRIDGE=/opt/segurai/app/whatsapp-core/bridge.mjs
+  export SEGURAI_WHATSAPP_BRIDGE=/opt/codex-agent/whatsapp-core/bridge.mjs
 
   if [[ -n "${OPENROUTER_API_KEY:-}" && "$SEGURAI_ENABLED" == "true" ]]; then
     echo "[$(date -Is)] SegurAI service starting with MCP ${HA_MCP_URL}" >>/data/segurai/segurai-service.log

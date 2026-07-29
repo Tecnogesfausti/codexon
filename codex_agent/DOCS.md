@@ -240,10 +240,10 @@ Este add-on se declara con:
 Eso permite cambiar o romper el sistema con facilidad. Úsalo solo en redes y máquinas de confianza.
 # WhatsApp directo con SegurAI
 
-SegurAI puede mantener una sesión de WhatsApp permanente usando el núcleo
-Baileys de HAWhatsUp. No usa MQTT, HTTP, puertos ni autenticación entre
-componentes: el proceso Baileys es hijo de SegurAI y ambos se comunican por una
-tubería interna JSON Lines.
+Codex Agent incorpora y mantiene el núcleo Baileys de HAWhatsUp dentro de su
+propia imagen. No usa MQTT, HTTP, puertos ni autenticación entre componentes:
+Codex entrega el transporte a la tarea interna de SegurAI y ambos se comunican
+por una tubería privada JSON Lines.
 
 Activa `segurai_whatsapp_enabled` y reinicia el add-on. En el primer arranque,
 abre el panel existente de SegurAI y vincula WhatsApp con el QR de la sección
