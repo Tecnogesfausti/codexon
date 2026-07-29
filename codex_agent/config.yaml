@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.2.3"
+version: "0.2.4"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
@@ -96,7 +96,7 @@ options:
   segurai_allow_actions_without_confirmation: false
   segurai_whatsapp_enabled: false
   segurai_whatsapp_allowed_senders: []
-  segurai_whatsapp_command_prefix: ""
+  segurai_whatsapp_wake_words: "casa|huerto|asistente|ia|robot"
   segurai_whatsapp_accept_own_messages: false
   segurai_whatsapp_allow_groups: false
 schema:
@@ -126,6 +126,6 @@ schema:
   segurai_whatsapp_enabled: "bool"
   segurai_whatsapp_allowed_senders:
     - "str"
-  segurai_whatsapp_command_prefix: "str?"
+  segurai_whatsapp_wake_words: "str?"
   segurai_whatsapp_accept_own_messages: "bool"
   segurai_whatsapp_allow_groups: "bool"

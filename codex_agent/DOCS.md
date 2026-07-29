@@ -251,6 +251,8 @@ abre el panel existente de SegurAI y vincula WhatsApp con el QR de la sección
 
 `segurai_whatsapp_allowed_senders` es opcional. Vacío acepta mensajes privados
 de cualquier remitente; si se rellena, solo acepta esos números internacionales
-sin necesidad del signo `+`. `segurai_whatsapp_command_prefix` también es
-opcional y permite exigir un prefijo como `SegurAI:`. Los grupos y los mensajes
-enviados por la propia cuenta se ignoran por defecto para evitar bucles.
+sin necesidad del signo `+`. `segurai_whatsapp_wake_words` permite exigir una
+de varias palabras de activación separadas por `|`, por ejemplo
+`casa|huerto|asistente|ia|robot`. No distingue mayúsculas ni acentos y elimina
+la palabra antes de entregar la orden. Los grupos y los mensajes enviados por
+la propia cuenta se ignoran por defecto para evitar bucles.

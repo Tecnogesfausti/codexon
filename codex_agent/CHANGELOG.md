@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- Añadida la opción portable `segurai_whatsapp_wake_words` para configurar varias palabras de activación separadas por `|`.
+- Sustituido el antiguo prefijo único de WhatsApp por palabras de activación configurables.
+
 ## 0.2.3
 
 - Persistidos contactos y mensajes recientes del núcleo WhatsApp.
