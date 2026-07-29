@@ -238,3 +238,19 @@ Este add-on se declara con:
 - montajes RW de configuración y add-ons
 
 Eso permite cambiar o romper el sistema con facilidad. Úsalo solo en redes y máquinas de confianza.
+# WhatsApp directo con SegurAI
+
+Codex Agent incorpora y mantiene el núcleo Baileys de HAWhatsUp dentro de su
+propia imagen. No usa MQTT, HTTP, puertos ni autenticación entre componentes:
+Codex entrega el transporte a la tarea interna de SegurAI y ambos se comunican
+por una tubería privada JSON Lines.
+
+Activa `segurai_whatsapp_enabled` y reinicia el add-on. En el primer arranque,
+abre el panel existente de SegurAI y vincula WhatsApp con el QR de la sección
+**WhatsApp**. La sesión queda persistida en `/data/segurai/whatsapp/auth`.
+
+`segurai_whatsapp_allowed_senders` es opcional. Vacío acepta mensajes privados
+de cualquier remitente; si se rellena, solo acepta esos números internacionales
+sin necesidad del signo `+`. `segurai_whatsapp_command_prefix` también es
+opcional y permite exigir un prefijo como `SegurAI:`. Los grupos y los mensajes
+enviados por la propia cuenta se ignoran por defecto para evitar bucles.

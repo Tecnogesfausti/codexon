@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Integrado el núcleo Baileys de HAWhatsUp como servicio interno del add-on Codex Agent.
+- La mensajería usa JSON Lines por stdin/stdout, sin MQTT, HTTP ni puertos adicionales.
+- Añadida persistencia de sesión, reconexión automática y QR en el panel existente de SegurAI.
+
 ## 0.2.0
 
 - SegurAI incorpora perfiles locales `site.yaml` para adaptar entidades, alias e instrucciones a cada instalación sin publicar datos privados.

@@ -1,3 +1,5 @@
+FROM node:20-bookworm-slim AS node_runtime
+
 FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -34,8 +36,6 @@ RUN apt-get update \
     jq \
     less \
     nano \
-    nodejs \
-    npm \
     openssh-server \
     python3 \
     python3-pip \
@@ -49,6 +49,16 @@ RUN apt-get update \
     util-linux \
     vim-tiny \
     yq \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+COPY --from=node_runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=node_runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY whatsapp-core/ /opt/codex-agent/whatsapp-core/
+
+RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+  && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+  && npm install --omit=dev --prefix /opt/codex-agent/whatsapp-core \
   && npm install -g "${CODEX_NPM_PACKAGE}" \
   && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
   && python3 -m venv /opt/esphome \
@@ -69,8 +79,7 @@ RUN apt-get update \
     esac \
   && curl -fsSL "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.${TTYD_ARCH}" -o /usr/local/bin/ttyd \
   && chmod +x /usr/local/bin/ttyd \
-  && apt-get clean \
-  && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+  && rm -rf /tmp/* /var/tmp/*
 
 COPY rootfs/ /
 RUN chmod +x \

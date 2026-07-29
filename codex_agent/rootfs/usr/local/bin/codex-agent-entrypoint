@@ -35,6 +35,11 @@ SEGURAI_SENSOR_PROMPT="$(read_option segurai_sensor_prompt "Consulta sensores de
 SEGURAI_FS_ROOTS="$(read_option segurai_fs_roots /ha_config,/addon_config,/share)"
 SEGURAI_NO_SENSOR_LOOP="$(read_bool segurai_no_sensor_loop)"
 SEGURAI_ALLOW_ACTIONS_WITHOUT_CONFIRMATION="$(read_bool segurai_allow_actions_without_confirmation)"
+SEGURAI_WHATSAPP_ENABLED="$(read_bool segurai_whatsapp_enabled)"
+SEGURAI_WHATSAPP_ALLOWED_SENDERS="$(jq -c '.segurai_whatsapp_allowed_senders // []' "$CONFIG_PATH")"
+SEGURAI_WHATSAPP_COMMAND_PREFIX="$(read_option segurai_whatsapp_command_prefix)"
+SEGURAI_WHATSAPP_ACCEPT_OWN_MESSAGES="$(read_bool segurai_whatsapp_accept_own_messages)"
+SEGURAI_WHATSAPP_ALLOW_GROUPS="$(read_bool segurai_whatsapp_allow_groups)"
 
 if [[ "$INGRESS_TARGET" != "segurai" ]]; then
   INGRESS_TARGET="codex"
@@ -165,6 +170,14 @@ start_segurai() {
   export SEGURAI_POLL_SECONDS="$SEGURAI_POLL_SECONDS"
   export SEGURAI_SENSOR_PROMPT="$SEGURAI_SENSOR_PROMPT"
   export SEGURAI_FS_ROOTS="$SEGURAI_FS_ROOTS"
+  export SEGURAI_WHATSAPP_ENABLED
+  export SEGURAI_WHATSAPP_ALLOWED_SENDERS
+  export SEGURAI_WHATSAPP_COMMAND_PREFIX
+  export SEGURAI_WHATSAPP_ACCEPT_OWN_MESSAGES
+  export SEGURAI_WHATSAPP_ALLOW_GROUPS
+  export SEGURAI_WHATSAPP_REJECT_CALLS=true
+  export SEGURAI_WHATSAPP_DATA_DIR=/data/segurai/whatsapp
+  export SEGURAI_WHATSAPP_BRIDGE=/opt/codex-agent/whatsapp-core/bridge.mjs
 
   if [[ -n "${OPENROUTER_API_KEY:-}" && "$SEGURAI_ENABLED" == "true" ]]; then
     echo "[$(date -Is)] SegurAI service starting with MCP ${HA_MCP_URL}" >>/data/segurai/segurai-service.log
@@ -223,6 +236,8 @@ MCP servers: $(codex mcp list 2>/dev/null | tr '\n' '; ' || true)
 SegurAI enabled: ${SEGURAI_ENABLED}
 SegurAI app: /data/segurai/app
 SegurAI logs: /data/segurai/segurai-service.log
+SegurAI WhatsApp: ${SEGURAI_WHATSAPP_ENABLED}
+WhatsApp status/QR: /data/segurai/whatsapp
 Ingress target: ${INGRESS_TARGET}
 Codex terminal port: ${CODEX_TERMINAL_PORT}
 SegurAI web port: ${SEGURAI_WEB_PORT}
