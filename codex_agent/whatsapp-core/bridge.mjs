@@ -15,12 +15,19 @@ import makeWASocket, {
 const DATA_DIR = process.env.SEGURAI_WHATSAPP_DATA_DIR || '/data/segurai/whatsapp';
 const AUTH_DIR = path.join(DATA_DIR, 'auth');
 const CONTACTS_PATH = path.join(DATA_DIR, 'contacts.json');
+const MESSAGES_PATH = path.join(DATA_DIR, 'messages.json');
 const STATUS_PATH = path.join(DATA_DIR, 'status.json');
 const QR_TEXT_PATH = path.join(DATA_DIR, 'qr.txt');
 const QR_DATA_URL_PATH = path.join(DATA_DIR, 'qr-data-url.txt');
 const REJECT_CALLS = !['0', 'false', 'no', 'off'].includes(
   String(process.env.SEGURAI_WHATSAPP_REJECT_CALLS || 'true').toLowerCase()
 );
+const configuredMessageHistory = Number(
+  process.env.SEGURAI_WHATSAPP_MESSAGE_HISTORY || 500
+);
+const MAX_MESSAGE_HISTORY = Number.isFinite(configuredMessageHistory)
+  ? Math.max(20, Math.min(5000, configuredMessageHistory))
+  : 500;
 
 const logger = pino(
   { level: process.env.SEGURAI_WHATSAPP_LOG_LEVEL || 'info' },
@@ -39,10 +46,12 @@ let messageCount = 0;
 let lastMessage = null;
 let qrText = null;
 const contacts = new Map();
+const recentMessages = [];
 const seenMessageIds = new Set();
 
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 loadContacts();
+loadMessages();
 writeStatus();
 startWhatsApp().catch(fatal);
 
@@ -129,6 +138,7 @@ function handleMessagesUpsert({ messages, type }) {
       name: normalized.pushName,
       notify: normalized.pushName
     });
+    recordMessage({ direction: 'incoming', ...normalized });
     writeStatus();
     emit({ type: 'message', source: 'notify', ...normalized });
   }
@@ -169,6 +179,15 @@ async function handleCommand(line) {
   const sent = await socket.sendMessage(jid, { text: message });
   if (sent?.key?.id) rememberMessageId(sent.key.id);
   upsertContact({ id: jid, name: jidToPhone(jid) || jid });
+  recordMessage({
+    direction: 'outgoing',
+    id: sent?.key?.id || '',
+    to: jid,
+    fromMe: true,
+    timestamp: Math.floor(Date.now() / 1000),
+    messageType: 'conversation',
+    body: message
+  });
   emit({
     type: 'send_result',
     ok: true,
@@ -185,20 +204,31 @@ function handleContacts(items) {
 function upsertContact(contact) {
   if (!contact?.id || !isContactJid(contact.id)) return;
   const previous = contacts.get(contact.id) || {};
-  const merged = { ...previous, ...contact };
   const displayName =
-    merged.name || merged.notify || merged.verifiedName || merged.id;
+    preferredContactName(contact) ||
+    preferredContactName(previous) ||
+    jidToPhone(contact.id) ||
+    contact.id;
   contacts.set(contact.id, {
     id: contact.id,
     name: displayName,
-    notify: merged.notify || '',
-    verifiedName: merged.verifiedName || '',
+    notify: contact.notify || previous.notify || '',
+    verifiedName: contact.verifiedName || previous.verifiedName || '',
     phone: jidToPhone(contact.id)
   });
   atomicWrite(
     CONTACTS_PATH,
     `${JSON.stringify({ contacts: [...contacts.values()] }, null, 2)}\n`
   );
+}
+
+function preferredContactName(contact) {
+  const phone = jidToPhone(contact?.id);
+  for (const value of [contact?.name, contact?.notify, contact?.verifiedName]) {
+    const candidate = String(value || '').trim();
+    if (candidate && candidate !== contact?.id && candidate !== phone) return candidate;
+  }
+  return '';
 }
 
 function loadContacts() {
@@ -209,6 +239,34 @@ function loadContacts() {
     }
   } catch (error) {
     if (error?.code !== 'ENOENT') logger.warn({ error }, 'no se pudieron cargar contactos');
+  }
+}
+
+function recordMessage(message) {
+  recentMessages.push(message);
+  if (recentMessages.length > MAX_MESSAGE_HISTORY) {
+    recentMessages.splice(0, recentMessages.length - MAX_MESSAGE_HISTORY);
+  }
+  atomicWrite(
+    MESSAGES_PATH,
+    `${JSON.stringify({ messages: recentMessages }, null, 2)}\n`
+  );
+}
+
+function loadMessages() {
+  try {
+    const stored = JSON.parse(fs.readFileSync(MESSAGES_PATH, 'utf8'));
+    const messages = Array.isArray(stored.messages) ? stored.messages : [];
+    recentMessages.push(...messages.slice(-MAX_MESSAGE_HISTORY));
+    messageCount = recentMessages.filter(
+      (message) => message?.direction === 'incoming'
+    ).length;
+    lastMessage =
+      [...recentMessages].reverse().find(
+        (message) => message?.direction === 'incoming'
+      ) || null;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') logger.warn({ error }, 'no se pudieron cargar mensajes');
   }
 }
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Persistidos contactos y mensajes recientes del núcleo WhatsApp.
+- Conservados nombres de contactos frente a actualizaciones con identificadores numéricos.
+- Preparado el historial entrante y saliente para las nuevas herramientas de SegurAI.
+
 ## 0.2.2
 
 - Fijado SegurAI a MCP 1.x para conservar la API `streamablehttp_client`.
