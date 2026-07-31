@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+- Añadida una barra de teclas táctiles en la terminal para Android y otros dispositivos móviles.
+- Incluidos `Esc`, `Tab`, flechas, un modificador `Ctrl` para la siguiente tecla y los atajos habituales `Ctrl+C`, `Ctrl+X`, `Ctrl+Z`, `Ctrl+L`, `Ctrl+D` y `Ctrl+R`.
+- La barra sólo ocupa espacio en pantallas táctiles o estrechas y mantiene el foco en ttyd.
+
 ## 0.2.5
 
 - Unificada la interfaz del add-on en una sola Ingress `8099`, con pestañas para estadísticas SegurAI y terminal Codex.
