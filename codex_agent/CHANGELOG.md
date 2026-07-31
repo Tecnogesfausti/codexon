@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Unificada la interfaz del add-on en una sola Ingress `8099`, con pestañas para estadísticas SegurAI y terminal Codex.
+- SegurAI web y ttyd quedan accesibles sólo mediante el proxy interno, sin publicar un segundo puerto HTTP.
+- La terminal conserva su sesión `ttyd + tmux`, el teclado interactivo y el portapapeles dentro del nuevo panel.
+- `ingress_target` queda obsoleto y se mantiene sólo por compatibilidad con configuraciones existentes.
+
 ## 0.2.4
 
 - Añadida la opción portable `segurai_whatsapp_wake_words` para configurar varias palabras de activación separadas por `|`.

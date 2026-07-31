@@ -20,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover
     readline = None  # type: ignore[assignment]
 
-DEFAULT_URLS = ("http://127.0.0.1:8098", "http://127.0.0.1:8099")
+DEFAULT_URLS = ("http://127.0.0.1:8098",)
 HISTORY_PATH = Path(os.getenv("SEGURAI_CONSOLE_HISTORY", "/data/segurai/segurai-console-history"))
 LAST_INTERACTION_PATH = Path(os.getenv("SEGURAI_LAST_INTERACTION", "/data/segurai/last-console-interaction.json"))
 
@@ -328,7 +328,7 @@ def main() -> int:
         client.get("/api/status")
     except Exception as exc:
         print(exc, file=sys.stderr)
-        print("Arranca la web de SegurAI con segurai_web_enabled=true o ingress_target=segurai.", file=sys.stderr)
+        print("Arranca la web de SegurAI con segurai_web_enabled=true.", file=sys.stderr)
         return 2
     SegurAIConsole(client).cmdloop()
     return 0

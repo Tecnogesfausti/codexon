@@ -5,7 +5,7 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.2.4
+ARG BUILD_VERSION=0.2.5
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG ESPHOME_PIP_PACKAGE="esphome"
 ARG SEGURAI_REPO="https://github.com/Tecnogesfausti/SegurAI.git"
@@ -36,6 +36,7 @@ RUN apt-get update \
     jq \
     less \
     nano \
+    nginx \
     openssh-server \
     python3 \
     python3-pip \

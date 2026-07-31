@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.2.4"
+version: "0.2.5"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
@@ -67,10 +67,8 @@ map:
     path: /ssl
 ports:
   2222/tcp: null
-  8098/tcp: null
 ports_description:
   2222/tcp: Optional SSH access to the agent container
-  8098/tcp: Optional SegurAI web panel when segurai_web_enabled is true
 options:
   openai_api_key: ""
   openrouter_api_key: ""

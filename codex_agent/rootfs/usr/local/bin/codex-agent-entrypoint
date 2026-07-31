@@ -27,7 +27,6 @@ REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
 INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
 SSH_ENABLED="$(read_bool ssh_enabled)"
 WEB_TERMINAL_ENABLED="$(read_bool web_terminal_enabled)"
-INGRESS_TARGET="$(read_option ingress_target codex)"
 SEGURAI_ENABLED="$(read_bool segurai_enabled)"
 SEGURAI_WEB_ENABLED="$(read_bool segurai_web_enabled)"
 SEGURAI_POLL_SECONDS="$(read_option segurai_poll_seconds 300)"
@@ -41,16 +40,9 @@ SEGURAI_WHATSAPP_WAKE_WORDS="$(read_option segurai_whatsapp_wake_words)"
 SEGURAI_WHATSAPP_ACCEPT_OWN_MESSAGES="$(read_bool segurai_whatsapp_accept_own_messages)"
 SEGURAI_WHATSAPP_ALLOW_GROUPS="$(read_bool segurai_whatsapp_allow_groups)"
 
-if [[ "$INGRESS_TARGET" != "segurai" ]]; then
-  INGRESS_TARGET="codex"
-fi
-if [[ "$INGRESS_TARGET" == "segurai" ]]; then
-  CODEX_TERMINAL_PORT=8098
-  SEGURAI_WEB_PORT=8099
-else
-  CODEX_TERMINAL_PORT=8099
-  SEGURAI_WEB_PORT=8098
-fi
+CODEX_TERMINAL_PORT=8100
+SEGURAI_WEB_PORT=8098
+INGRESS_PORT=8099
 
 if [[ -n "$OPENAI_API_KEY" ]]; then
   export OPENAI_API_KEY
@@ -205,13 +197,13 @@ start_segurai() {
     echo "[$(date -Is)] SegurAI service disabled: openrouter_api_key is empty" >>/data/segurai/segurai-service.log
   fi
 
-  if [[ "$SEGURAI_WEB_ENABLED" == "true" || "$INGRESS_TARGET" == "segurai" ]]; then
+  if [[ "$SEGURAI_WEB_ENABLED" == "true" ]]; then
     echo "[$(date -Is)] SegurAI web starting on ${SEGURAI_WEB_PORT}" >>/data/segurai/segurai-web.log
-    (cd /data/segurai/app && SEGURAI_DATA_DIR=/data/segurai /opt/segurai/bin/python -m uvicorn segurai_web:app --host 0.0.0.0 --port "${SEGURAI_WEB_PORT}") >>/data/segurai/segurai-web.log 2>&1 &
+    (cd /data/segurai/app && SEGURAI_DATA_DIR=/data/segurai /opt/segurai/bin/python -m uvicorn segurai_web:app --host 127.0.0.1 --port "${SEGURAI_WEB_PORT}") >>/data/segurai/segurai-web.log 2>&1 &
   fi
 }
 
-if [[ "$SEGURAI_ENABLED" == "true" || "$SEGURAI_WEB_ENABLED" == "true" || "$INGRESS_TARGET" == "segurai" ]]; then
+if [[ "$SEGURAI_ENABLED" == "true" || "$SEGURAI_WEB_ENABLED" == "true" ]]; then
   start_segurai
 fi
 
@@ -229,7 +221,7 @@ if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
     echo "[$(date -Is)] ttyd starting on ${CODEX_TERMINAL_PORT}"
     ttyd \
       --port "${CODEX_TERMINAL_PORT}" \
-      --interface 0.0.0.0 \
+      --interface 127.0.0.1 \
       --writable \
       --terminal-type xterm-256color \
       --client-option titleFixed="Codex Agent" \
@@ -257,9 +249,9 @@ SegurAI app: /data/segurai/app
 SegurAI logs: /data/segurai/segurai-service.log
 SegurAI WhatsApp: ${SEGURAI_WHATSAPP_ENABLED}
 WhatsApp status/QR: /data/segurai/whatsapp
-Ingress target: ${INGRESS_TARGET}
-Codex terminal port: ${CODEX_TERMINAL_PORT}
-SegurAI web port: ${SEGURAI_WEB_PORT}
+Ingress portal port: ${INGRESS_PORT}
+Codex terminal internal port: ${CODEX_TERMINAL_PORT}
+SegurAI web internal port: ${SEGURAI_WEB_PORT}
 ESPHome: $(esphome-version-check 2>/dev/null || true)
 
 Useful commands:
@@ -277,10 +269,9 @@ EOF
 echo "[codex-agent] ready"
 echo "[codex-agent] workspace: ${WORKSPACE}"
 echo "[codex-agent] require_confirmation: ${REQUIRE_CONFIRMATION}"
-echo "[codex-agent] ingress target: ${INGRESS_TARGET}"
-echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} on port ${CODEX_TERMINAL_PORT}"
-echo "[codex-agent] segurai: ${SEGURAI_ENABLED} web port ${SEGURAI_WEB_PORT}"
+echo "[codex-agent] ingress portal: port ${INGRESS_PORT}"
+echo "[codex-agent] web terminal: ${WEB_TERMINAL_ENABLED} internal port ${CODEX_TERMINAL_PORT}"
+echo "[codex-agent] segurai: ${SEGURAI_ENABLED} internal web port ${SEGURAI_WEB_PORT}"
 esphome-version-check || true
 echo "[codex-agent] start a shell with: docker exec -it <container> bash"
-
-tail -f /dev/null
+exec nginx -g "daemon off;"

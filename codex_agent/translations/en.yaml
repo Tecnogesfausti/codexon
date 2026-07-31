@@ -30,8 +30,8 @@ configuration:
     name: Web terminal enabled
     description: Enable the Home Assistant sidebar terminal through Ingress.
   ingress_target:
-    name: Ingress target
-    description: Choose codex for the terminal button or segurai for the SegurAI web panel button. Restart the add-on after changing.
+    name: Legacy Ingress target
+    description: Deprecated compatibility option. The single Ingress portal now contains both the SegurAI statistics and Codex terminal tabs.
   require_confirmation:
     name: Require confirmation
     description: Keep manual confirmation enabled for agent actions.
@@ -50,7 +50,7 @@ configuration:
     description: Start SegurAI as a background 24/7 service inside this Codex add-on.
   segurai_web_enabled:
     name: SegurAI web panel enabled
-    description: Expose the optional SegurAI web panel on direct port 8098.
+    description: Show the optional SegurAI statistics panel through the shared Ingress portal.
   segurai_poll_seconds:
     name: SegurAI poll seconds
     description: Sensor polling interval for the SegurAI service.

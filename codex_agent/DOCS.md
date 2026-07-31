@@ -4,7 +4,9 @@ Codex Agent ejecuta Codex CLI dentro de Home Assistant como add-on con permisos 
 
 ## Panel lateral
 
-El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Codex Agent**, igual que otros terminales web. El panel abre una terminal `ttyd` dentro del contenedor.
+El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Codex Agent**. El panel único ofrece dos pestañas: **Estadísticas** de SegurAI y **Terminal** Codex.
+
+La terminal continúa siendo `ttyd + tmux`: conserva la edición interactiva, las teclas especiales, el historial y la sesión al cambiar de pestaña o reconectar.
 
 Desde ese panel puedes ejecutar:
 
@@ -117,7 +119,7 @@ El arranque del panel web escribe en `/share/codex-agent/web-terminal.log` y dej
 
 ## SegurAI opcional
 
-El add-on puede arrancar SegurAI como servicio 24/7 sin tocar la terminal Codex. La terminal lateral sigue siendo `ttyd + tmux` en Ingress `8099`; SegurAI se copia a `/data/segurai/app` en el primer arranque y se ejecuta desde esa ruta para que Codex pueda modificarlo de forma persistente.
+El add-on puede arrancar SegurAI como servicio 24/7 sin tocar la terminal Codex. SegurAI se copia a `/data/segurai/app` en el primer arranque y se ejecuta desde esa ruta para que Codex pueda modificarlo de forma persistente.
 
 Cada vivienda debe mantener su contexto fuera del repositorio. Para iniciar un perfil local:
 
@@ -133,8 +135,7 @@ Opciones principales:
 ```yaml
 openrouter_api_key: "sk-or-..."
 segurai_enabled: true
-segurai_web_enabled: false
-ingress_target: "codex"
+segurai_web_enabled: true
 segurai_poll_seconds: 300
 segurai_fs_roots: "/ha_config,/addon_config,/share"
 ```
@@ -146,7 +147,8 @@ tail -f /data/segurai/segurai-service.log
 tail -f /data/segurai/segurai-runtime.log
 ```
 
-El botón Ingress del add-on siempre entra por `8099`, pero `ingress_target` decide qué se ve tras reiniciar: `codex` deja la terminal en el botón y SegurAI web en `8098`; `segurai` pone SegurAI web en el botón y mueve la terminal Codex a `8098`. En ese modo la web de SegurAI arranca aunque `segurai_web_enabled` esté en `false`.
+El add-on expone un único servidor web por Ingress `8099`. Dentro del contenedor, el portal envía `/stats/` a SegurAI y `/terminal/` a ttyd; esos servicios internos sólo escuchan en `127.0.0.1` y no publican puertos adicionales. La opción antigua `ingress_target` se conserva únicamente para que las configuraciones instaladas sigan siendo válidas, pero ya no altera el panel ni los puertos.
+
 Desde la terminal Codex puedes controlar el servicio real sin arrancar otro `segurai.py`:
 
 ```sh
@@ -170,7 +172,7 @@ Comandos útiles dentro del prompt:
 /salir
 ```
 
-`segurai-console` habla con la API web local de SegurAI en `8098` o `8099`, según `ingress_target`.
+`segurai-console` habla con la API web local de SegurAI en su puerto interno `8098`.
 
 Para conversar con el SegurAI completo, usando `segurai.py` real, memoria, MCP y herramientas:
 
