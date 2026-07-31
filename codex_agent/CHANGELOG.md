@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Añadida a Estadísticas una pestaña de memorias recientes con fecha, tipo, tema, contenido, confianza y origen.
+- El resumen de memorias se carga de forma independiente para que un fallo transitorio de otra API no deje el panel incompleto.
+- Los errores de carga se muestran dentro de la sección afectada y permiten reintentar sin recargar toda la Ingress.
+
 ## 0.2.6
 
 - Añadida una barra de teclas táctiles en la terminal para Android y otros dispositivos móviles.

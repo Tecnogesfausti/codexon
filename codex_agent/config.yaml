@@ -1,6 +1,6 @@
 name: Codex Agent
 slug: codex_agent
-version: "0.2.6"
+version: "0.2.7"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/ha_codex_agent
 arch:
