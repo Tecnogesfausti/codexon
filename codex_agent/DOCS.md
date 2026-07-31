@@ -257,4 +257,6 @@ sin necesidad del signo `+`. `segurai_whatsapp_wake_words` permite exigir una
 de varias palabras de activación separadas por `|`, por ejemplo
 `casa|huerto|asistente|ia|robot`. No distingue mayúsculas ni acentos y elimina
 la palabra antes de entregar la orden. Los grupos y los mensajes enviados por
-la propia cuenta se ignoran por defecto para evitar bucles.
+la propia cuenta se aceptan siempre; no necesitan opciones separadas en la
+configuración del add-on. Las palabras de activación siguen aplicándose antes
+de entregar la orden a SegurAI.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+
+- La barra `Ctrl`, `Esc`, `Tab` y flechas se muestra siempre dentro de Terminal, sin depender de cómo el WebView Android anuncie el puntero o el ancho.
+- Añadido versionado de los scripts incrustados y cabeceras sin caché para evitar que Home Assistant Companion reutilice interfaces anteriores.
+- Eliminadas las opciones redundantes para mensajes propios y grupos de WhatsApp; ambos tipos quedan aceptados internamente por defecto.
+
 ## 0.2.7
 
 - Añadida a Estadísticas una pestaña de memorias recientes con fecha, tipo, tema, contenido, confianza y origen.

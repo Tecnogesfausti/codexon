@@ -1,13 +1,14 @@
 (() => {
-  const mobile = matchMedia('(pointer: coarse), (max-width: 720px)');
-  if (!mobile.matches || document.getElementById('codex-mobile-keys')) return;
+  if (document.getElementById('codex-mobile-keys')) return;
 
   const style = document.createElement('style');
   style.textContent = `
-    #terminal-container { height: calc(100% - 50px) !important; }
+    #terminal-container { height: calc(100% - 50px - env(safe-area-inset-bottom, 0px)) !important; }
     #codex-mobile-keys {
-      position: fixed; inset: auto 0 0; z-index: 10000; height: 50px;
-      display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+      position: fixed; inset: auto 0 0; z-index: 10000;
+      min-height: calc(50px + env(safe-area-inset-bottom, 0px));
+      display: flex; align-items: flex-start; gap: 6px;
+      padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
       overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none;
       background: #111827; border-top: 1px solid #273449;
     }
@@ -24,31 +25,34 @@
   document.head.appendChild(style);
 
   const keys = [
-    ['Esc', 'Escape', 'Escape', 27],
-    ['Tab', 'Tab', 'Tab', 9],
-    ['Ctrl+C', 'c', 'KeyC', 67, true],
-    ['Ctrl+X', 'x', 'KeyX', 88, true],
-    ['Ctrl+Z', 'z', 'KeyZ', 90, true],
-    ['Ctrl+L', 'l', 'KeyL', 76, true],
-    ['Ctrl+D', 'd', 'KeyD', 68, true],
-    ['Ctrl+R', 'r', 'KeyR', 82, true],
-    ['←', 'ArrowLeft', 'ArrowLeft', 37],
-    ['↑', 'ArrowUp', 'ArrowUp', 38],
-    ['↓', 'ArrowDown', 'ArrowDown', 40],
-    ['→', 'ArrowRight', 'ArrowRight', 39],
+    ['Esc', '\x1b'],
+    ['Tab', '\x09'],
+    ['Ctrl+C', '\x03'],
+    ['Ctrl+X', '\x18'],
+    ['Ctrl+Z', '\x1a'],
+    ['Ctrl+L', '\x0c'],
+    ['Ctrl+D', '\x04'],
+    ['Ctrl+R', '\x12'],
+    ['←', '\x1b[D'],
+    ['↑', '\x1b[A'],
+    ['↓', '\x1b[B'],
+    ['→', '\x1b[C'],
   ];
 
   function textarea() {
     return document.querySelector('.xterm-helper-textarea');
   }
 
-  function sendKey(key, code, keyCode, ctrlKey = false) {
+  function sendData(data) {
     const target = textarea();
     if (!target) return;
     target.focus({preventScroll: true});
-    const init = {key, code, keyCode, which: keyCode, ctrlKey, bubbles: true, cancelable: true};
-    target.dispatchEvent(new KeyboardEvent('keydown', init));
-    target.dispatchEvent(new KeyboardEvent('keyup', init));
+    target.dispatchEvent(new InputEvent('input', {
+      data,
+      inputType: 'insertText',
+      bubbles: true,
+      cancelable: true,
+    }));
   }
 
   const toolbar = document.createElement('div');
@@ -62,7 +66,8 @@
   ctrl.textContent = 'Ctrl';
   ctrl.setAttribute('aria-label', 'Control para la siguiente tecla');
   ctrl.setAttribute('aria-pressed', 'false');
-  ctrl.addEventListener('pointerdown', event => {
+  ctrl.addEventListener('pointerdown', event => event.preventDefault());
+  ctrl.addEventListener('click', event => {
     event.preventDefault();
     ctrlArmed = !ctrlArmed;
     ctrl.classList.toggle('armed', ctrlArmed);
@@ -78,17 +83,20 @@
     ctrlArmed = false;
     ctrl.classList.remove('armed');
     ctrl.setAttribute('aria-pressed', 'false');
-    sendKey(event.key, event.code, event.keyCode || event.which, true);
+    if (event.key.length === 1) {
+      sendData(String.fromCharCode(event.key.toUpperCase().charCodeAt(0) & 31));
+    }
   }, true);
 
-  keys.forEach(([label, key, code, keyCode, ctrlKey]) => {
+  keys.forEach(([label, data]) => {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = label;
     button.setAttribute('aria-label', label);
-    button.addEventListener('pointerdown', event => {
+    button.addEventListener('pointerdown', event => event.preventDefault());
+    button.addEventListener('click', event => {
       event.preventDefault();
-      sendKey(key, code, keyCode, Boolean(ctrlKey));
+      sendData(data);
     });
     toolbar.appendChild(button);
   });
