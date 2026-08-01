@@ -322,7 +322,7 @@ export CODEXON_TASK_TIMEOUT_SECONDS=45
 
 ## Home Assistant Add-on
 
-Este repositorio ya incluye un primer add-on en `codexon-addon/` para instalarlo como repositorio personalizado de Home Assistant.
+El add-on publicable está en la carpeta superior `codexon/` del monorepo. El núcleo de este directorio se empaqueta dentro de esa única imagen; no existe un segundo add-on anidado.
 
 En Home Assistant:
 
@@ -331,9 +331,9 @@ En Home Assistant:
 3. Añade: `https://github.com/Tecnogesfausti/codexon`
 4. Instala el add-on `Codexon`.
 5. En la configuración del add-on pon `openrouter_api_key`.
-6. Arranca el add-on y abre el panel web desde Ingress.
+6. Arranca el add-on y abre el portal único desde Ingress.
 
-La primera versión del add-on arranca por defecto en modo `web_only`, mostrando panel visual, memoria, tareas, herramientas y logs. Para arrancar el agente de terminal dentro del contenedor, cambia `web_only` a `false`.
+Codexon y su web quedan activos por defecto. El portal ofrece las estadísticas y la terminal Codex sin publicar un segundo puerto HTTP.
 
 
 ### Monitor de temperatura
@@ -401,31 +401,28 @@ El agente diferencia prediccion/modelo de medicion observada y solo recomienda p
 
 ### Terminal tmux persistente
 
-El add-on mantiene una terminal persistente basada en `ttyd + tmux`, separada del panel web. La web sigue en `8099`; la terminal escucha por defecto en `8098` y siempre reengancha a la sesion `codexon-terminal`.
+El add-on mantiene una terminal persistente basada en `ttyd + tmux`, integrada en el mismo portal Ingress `8099`. La terminal sólo escucha internamente y siempre reengancha a la sesión `codexon`.
 
 ```yaml
-terminal_enabled: true
-terminal_port: 8098
-terminal_username: "codexon"
-terminal_password: "cambiala-en-tu-addon"
+web_terminal_enabled: true
 ```
 
 La terminal arranca en `workspace` y conserva estado aunque cierres el navegador. Logs:
 
 ```text
-/config/data/codexon_terminal.log
+/share/codexon/web-terminal.log
 ```
 
-Desde ella puedes abrir `CODEX_CONTEXT.md`, revisar logs, lanzar Codex o trabajar en el workspace Git sin parar el servicio Codexon. Al ser una shell real expuesta por puerto directo, cambia `terminal_password` antes de dejarla activa en tu red.
+Desde ella puedes abrir `CODEX_CONTEXT.md`, revisar logs, lanzar Codex o trabajar en el workspace Git sin parar el servicio Codexon. El acceso se mantiene dentro de la autenticación Ingress de Home Assistant.
 
 ### Configuracion Codex interactivo
 
-Codexon acepta tambien la configuracion compatible con el add-on `ha_codexon`:
+El add-on configura Codex CLI con estas opciones:
 
 ```yaml
 codex_model: "gpt-5.3-codex"
 codex_home: "/data/codex"
-workspace: "/config/codexon-dev"
+workspace: "/ha_config"
 mcp_server_url: "http://supervisor/core/api/mcp"
 ```
 
@@ -444,7 +441,7 @@ backup_key: "una-clave-larga-privada"
 El backup se guarda en:
 
 ```text
-/config/data/backups/codexon-backup-YYYYMMDDTHHMMSSZ.tar.gz.enc
+/data/codexon/backups/codexon-backup-YYYYMMDDTHHMMSSZ.tar.gz.enc
 ```
 
 Se cifra con OpenSSL AES-256-CBC + PBKDF2. Para descifrar:
@@ -466,15 +463,15 @@ El panel web genera un contexto de mantenimiento para una sesion Codex/tmux exte
 En el add-on se guardan en:
 
 ```text
-/config/data/CODEX_CONTEXT.md
-/config/data/CODEX_NOTES.md
+/data/codexon/CODEX_CONTEXT.md
+/data/codexon/CODEX_NOTES.md
 ```
 
 Desde la UI usa **Codex mantenimiento** para refrescar el contexto y guardar notas. Desde una terminal Codex, abre primero `CODEX_CONTEXT.md` y usa esas rutas para corregir o extender Codexon.
 
 ### Configuracion compartida HA/MCP
 
-Codexon usa los mismos nombres de configuracion que `ha_codexon` para Home Assistant y MCP:
+Codexon usa estas opciones para Home Assistant y MCP:
 
 ```yaml
 home_assistant_token: ""
@@ -487,14 +484,14 @@ Precedencia del token HA: `home_assistant_token`, despues `ha_long_lived_token`,
 
 ### Servicio persistente en el add-on
 
-El add-on puede arrancar Codexon como servicio 24/7 en segundo plano mientras mantiene el panel web abierto. La opción `agent_service_enabled` controla ese proceso. En modo servicio se usa `codexon.py --service`, que mantiene MCP, scheduler de tareas y observadores sin abrir el prompt interactivo.
+El add-on arranca Codexon como servicio 24/7 en segundo plano mientras mantiene el panel web abierto. La opción `codexon_enabled` controla el núcleo y `codexon_web_enabled` controla la web. En modo servicio se usa `codexon.py --service`, que mantiene MCP, scheduler de tareas y observadores sin abrir el prompt interactivo.
 
 ```yaml
-agent_service_enabled: true
-web_only: true
+codexon_enabled: true
+codexon_web_enabled: true
 ```
 
-Con esta combinación, la web queda disponible por Ingress/puerto 8099 y las tareas creadas desde la UI son ejecutadas por el proceso Codexon residente. Los logs del servicio se escriben en `/config/data/codexon_service.log`.
+Con esta combinación, la web queda disponible por Ingress `8099` y las tareas creadas desde la UI son ejecutadas por el proceso Codexon residente. Los logs del servicio se escriben en `/data/codexon/codexon-service.log`.
 
 La terminal persistente tipo `tmux` queda integrada como herramienta de mantenimiento y desarrollo. No es el motor del scheduler: Codexon ya puede esperar, ejecutar tareas y guardar resultados de forma persistente desde su proceso de servicio.
 
@@ -511,8 +508,8 @@ La UI web permite gestionar Codexon desde el navegador:
 Variables utiles:
 
 ```bash
-CODEXON_DB=/config/data/codexon_memory.sqlite3
-CODEXON_AGENT_CONFIG=/config/data/agent_config.json
+CODEXON_DB=/data/codexon/codexon_memory.sqlite3
+CODEXON_AGENT_CONFIG=/data/codexon/agent_config.json
 CODEXON_AGENTS_DIR=agents
 ```
 

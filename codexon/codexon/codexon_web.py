@@ -41,9 +41,12 @@ VALID_TASK_STATUSES = {"pending", "cancelled"}
 
 
 def default_data_dir() -> Path:
-    if os.getenv("SUPERVISOR_TOKEN") or Path("/config").is_dir():
-        return Path("/config/data")
-    return Path(os.getenv("CODEXON_DATA_DIR", "data"))
+    configured = os.getenv("CODEXON_DATA_DIR")
+    if configured:
+        return Path(configured)
+    if os.getenv("SUPERVISOR_TOKEN"):
+        return Path("/data/codexon")
+    return Path("data")
 
 
 DATA_DIR = default_data_dir()
@@ -61,7 +64,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.2.0")
+app = FastAPI(title="Codexon", version="0.3.0")
 
 
 def utc_now() -> str:

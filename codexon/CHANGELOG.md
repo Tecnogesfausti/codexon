@@ -6,6 +6,7 @@
 - Unificada toda la identidad del producto como Codexon: add-on, slug, panel, comandos, módulos, rutas, variables, logs, base de datos, WhatsApp, documentación y pruebas.
 - Los comandos de servicio son ahora `codexon-console`, `codexon-chat` y `codexon-teach`.
 - El add-on arranca automáticamente y activa por defecto el núcleo Codexon y su panel web.
+- Eliminado el manifiesto de add-on anidado y obsoleto para que Supervisor descubra únicamente Codexon 0.3.0.
 - Codexon se copia desde el propio contexto de construcción; la imagen ya no clona ni depende de los repositorios antiguos.
 - GitHub CLI (`gh`) queda instalado permanentemente para autenticar, revisar repositorios y publicar cambios desde Codex.
 

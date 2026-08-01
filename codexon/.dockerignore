@@ -2,7 +2,6 @@
 codexon/**/__pycache__
 codexon/**/*.py[cod]
 codexon/**/.pytest_cache
-codexon/codexon-addon
 codexon/*.sqlite
 codexon/*.sqlite3
 codexon/*.bak-*
