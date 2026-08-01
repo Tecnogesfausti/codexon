@@ -574,6 +574,44 @@ def readonly_entity_inventory_intent(value: str) -> bool:
     return explicit_question or requested_all or capability_question
 
 
+def historical_active_device_measurement_intent(value: str) -> bool:
+    """Identify historical consumption that must be attributed to device activity."""
+    folded = normalize_entity_alias(value)
+    measurement = bool(
+        re.search(
+            r"\b(?:litros?|l|m3|metros? cubicos?|kwh|wh|kilovatios?(?: hora)?|"
+            r"vatios?(?: hora)?|euros?|consumo|consumido|gastado|usado)\b",
+            folded,
+        )
+    )
+    if not measurement:
+        return False
+    historical_period = bool(
+        re.search(
+            r"\b(?:ayer|anteayer|semana|mes|ano|dia|dias|hora|horas|"
+            r"ultima|ultimo|ultimas|ultimos|pasada|pasado|desde|entre|durante)\b",
+            folded,
+        )
+    )
+    historical_consumption = bool(
+        re.search(
+            r"\b(?:ha|han|habia|habian|haya|hayan)?\s*"
+            r"(?:consumido|gastado|usado|registrado)\b|"
+            r"\b(?:consumio|consumieron|gasto|gastaron|uso|usaron|registro|registraron)\b",
+            folded,
+        )
+    )
+    active_device = bool(
+        re.search(
+            r"\b(?:grifos?|valvulas?|zonas?|riegos?|bombas?|interruptores?|switch(?:es)?|"
+            r"reles?|relays?|maquinas?|equipos?|aparatos?|aires? acondicionados?|"
+            r"climatizadores?|calefactores?|lavadoras?|secadoras?|lavavajillas)\b",
+            folded,
+        )
+    )
+    return historical_period and historical_consumption and active_device
+
+
 def requested_ac_pvpc_budget_plan(user_text: str) -> dict[str, Any] | None:
     folded = normalize_entity_alias(user_text)
     if not any(term in folded for term in ("aire", "aire acondicionado", "ac", "clima", "brokton")):
@@ -4419,6 +4457,12 @@ Tareas pendientes:
         inventory_query = task == "homeassistant" and readonly_entity_inventory_intent(user_text)
         inventory_retry_sent = False
         inventory_tool_used = False
+        measurement_query = (
+            task == "homeassistant"
+            and historical_active_device_measurement_intent(user_text)
+        )
+        measurement_retry_sent = False
+        measurement_tool_used = False
         for _ in range(MAX_TOOL_ROUNDS):
             response = await self._chat(
                 working_messages,
@@ -4431,6 +4475,28 @@ Tareas pendientes:
 
             if not tool_calls:
                 answer = msg.content or ""
+                if measurement_query and not measurement_tool_used:
+                    if measurement_retry_sent:
+                        answer = (
+                            "No he podido calcular el consumo historico de forma fiable porque "
+                            "no se ejecuto la medicion requerida."
+                        )
+                        working_messages.append({"role": "assistant", "content": answer})
+                        break
+                    measurement_retry_sent = True
+                    working_messages.append({"role": "assistant", "content": answer})
+                    working_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "La respuesta anterior esta incompleta: la peticion pide atribuir un consumo "
+                                "historico a la actividad de un dispositivo. Resuelve la entidad de actividad "
+                                "y el sensor numerico asociado y ejecuta ha_measure_numeric_during_state para "
+                                "el periodo solicitado. No respondas solamente con un entity_id."
+                            ),
+                        }
+                    )
+                    continue
                 if inventory_query and not inventory_tool_used:
                     if inventory_retry_sent:
                         answer = (
@@ -4498,6 +4564,11 @@ Tareas pendientes:
                 }
                 if inventory_query and real_name in inventory_read_tools:
                     inventory_tool_used = True
+                if (
+                    measurement_query
+                    and real_name == "__builtin__:ha_measure_numeric_during_state"
+                ):
+                    measurement_tool_used = True
                 if inventory_query and (
                     self.is_execution_action_tool(real_name)
                     or real_name

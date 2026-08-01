@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Las preguntas de consumo historico atribuido a un dispositivo deben ejecutar la medicion cruzada entre su actividad y el contador numerico; resolver solamente el `entity_id` ya no se acepta como respuesta.
+- Añadida una recuperacion generica para estas consultas, sin reglas ligadas a los bonsais ni a entidades concretas.
+
 ## 0.3.2
 
 - Añadida una importación local de una sola vez desde `/share/codexon-migration` para trasladar sesiones Codex/GitHub, memoria, tareas, perfiles, enseñanzas, copias y WhatsApp al volumen del nuevo add-on.

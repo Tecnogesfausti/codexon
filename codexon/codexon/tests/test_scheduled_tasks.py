@@ -10,6 +10,7 @@ from codexon import (
     CodexonAgent,
     completion_notification_requested,
     critical_action_requested,
+    historical_active_device_measurement_intent,
     lexical_correction_suggestion,
     requested_ac_pvpc_valley_plan,
     requested_ac_until_price_drop_plan,
@@ -131,6 +132,26 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
         )
         self.assertFalse(
             readonly_entity_inventory_intent("enciende todos los grifos de la huerta")
+        )
+
+    def test_historical_device_consumption_requires_attributed_measurement(self) -> None:
+        self.assertTrue(
+            historical_active_device_measurement_intent(
+                "casa cuantos litros ha gastado el grifo de los bonsais esta ultima semana?"
+            )
+        )
+        self.assertTrue(
+            historical_active_device_measurement_intent(
+                "cuantos kWh consumio el aire acondicionado la semana pasada"
+            )
+        )
+        self.assertFalse(
+            historical_active_device_measurement_intent("riega los bonsais con 20 litros")
+        )
+        self.assertFalse(
+            historical_active_device_measurement_intent(
+                "cual es el entity_id del grifo de los bonsais"
+            )
         )
 
     def test_critical_actions_offer_completion_alert_but_queries_do_not(self) -> None:
