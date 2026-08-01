@@ -1,0 +1,269 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONFIG_PATH=/data/options.json
+
+read_option() {
+  local key="$1"
+  local fallback="${2:-}"
+  jq -r --arg key "$key" --arg fallback "$fallback" '.[$key] // $fallback' "$CONFIG_PATH"
+}
+
+read_bool() {
+  local key="$1"
+  jq -r --arg key "$key" '.[$key] // false' "$CONFIG_PATH"
+}
+
+OPENAI_API_KEY="$(read_option openai_api_key)"
+OPENROUTER_API_KEY="$(read_option openrouter_api_key)"
+HOME_ASSISTANT_TOKEN="$(read_option home_assistant_token)"
+HA_LONG_LIVED_TOKEN="$(read_option ha_long_lived_token)"
+MCP_SERVER_URL="$(read_option mcp_server_url)"
+MCP_SERVER_API_KEY="$(read_option mcp_server_api_key)"
+CODEX_MODEL="$(read_option codex_model gpt-5.3-codex)"
+CODEX_HOME="$(read_option codex_home /data/codex)"
+WORKSPACE="$(read_option workspace /ha_config)"
+REQUIRE_CONFIRMATION="$(read_bool require_confirmation)"
+INSTALL_MCP_SERVERS="$(read_bool install_mcp_servers)"
+SSH_ENABLED="$(read_bool ssh_enabled)"
+WEB_TERMINAL_ENABLED="$(read_bool web_terminal_enabled)"
+CODEXON_ENABLED="$(read_bool codexon_enabled)"
+CODEXON_WEB_ENABLED="$(read_bool codexon_web_enabled)"
+CODEXON_POLL_SECONDS="$(read_option codexon_poll_seconds 300)"
+CODEXON_SENSOR_PROMPT="$(read_option codexon_sensor_prompt "Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen.")"
+CODEXON_FS_ROOTS="$(read_option codexon_fs_roots /ha_config,/addon_config,/share)"
+CODEXON_NO_SENSOR_LOOP="$(read_bool codexon_no_sensor_loop)"
+CODEXON_ALLOW_ACTIONS_WITHOUT_CONFIRMATION="$(read_bool codexon_allow_actions_without_confirmation)"
+CODEXON_WHATSAPP_ENABLED="$(read_bool codexon_whatsapp_enabled)"
+CODEXON_WHATSAPP_ALLOWED_SENDERS="$(jq -c '.codexon_whatsapp_allowed_senders // []' "$CONFIG_PATH")"
+CODEXON_WHATSAPP_WAKE_WORDS="$(read_option codexon_whatsapp_wake_words)"
+
+CODEX_TERMINAL_PORT=8100
+CODEXON_WEB_PORT=8098
+INGRESS_PORT=8099
+
+if [[ -n "$OPENAI_API_KEY" ]]; then
+  export OPENAI_API_KEY
+else
+  unset OPENAI_API_KEY
+fi
+export OPENROUTER_API_KEY
+export HOME_ASSISTANT_TOKEN
+export HA_LONG_LIVED_TOKEN
+export MCP_SERVER_URL
+export MCP_SERVER_API_KEY
+export CODEX_MODEL
+export CODEX_HOME
+export PLATFORMIO_CORE_DIR="${PLATFORMIO_CORE_DIR:-$CODEX_HOME/platformio}"
+export PLATFORMIO_PACKAGES_DIR="${PLATFORMIO_PACKAGES_DIR:-$PLATFORMIO_CORE_DIR/packages}"
+export WORKSPACE
+export WEB_TERMINAL_ENABLED
+export HOME="$CODEX_HOME"
+if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
+  export HA_URL="http://supervisor/core/api"
+else
+  export HA_URL="http://homeassistant:8123/api"
+fi
+export SUPERVISOR_URL="http://supervisor"
+
+mkdir -p "$CODEX_HOME" "$WORKSPACE" "$PLATFORMIO_CORE_DIR" "$PLATFORMIO_PACKAGES_DIR" /data/logs /data/mcp /data/codexon /run/sshd
+chmod 700 "$CODEX_HOME"
+if [[ ! -f /data/codexon/app/codexon.py ]]; then
+  mkdir -p /data/codexon/app
+  rsync -a /opt/codexon/app/ /data/codexon/app/
+fi
+
+CODEXON_RUNTIME_MIGRATION=runtime-0.3.0
+CODEXON_MIGRATION_DIR=/data/codexon/migrations
+CODEXON_MIGRATION_MARKER="${CODEXON_MIGRATION_DIR}/${CODEXON_RUNTIME_MIGRATION}"
+if [[ ! -f "$CODEXON_MIGRATION_MARKER" ]]; then
+  CODEXON_RUNTIME_BACKUP="/data/codexon/backups/${CODEXON_RUNTIME_MIGRATION}-previous"
+  mkdir -p "$CODEXON_MIGRATION_DIR" "$CODEXON_RUNTIME_BACKUP"
+  rsync -a \
+    --exclude='.git/' \
+    --backup \
+    --backup-dir="$CODEXON_RUNTIME_BACKUP" \
+    /opt/codexon/app/ \
+    /data/codexon/app/
+  date -Is >"$CODEXON_MIGRATION_MARKER"
+fi
+
+if [[ -n "$HOME_ASSISTANT_TOKEN" ]]; then
+  export HA_TOKEN="$HOME_ASSISTANT_TOKEN"
+elif [[ -n "$HA_LONG_LIVED_TOKEN" ]]; then
+  export HA_TOKEN="$HA_LONG_LIVED_TOKEN"
+else
+  export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
+fi
+
+MCP_AUTH_TOKEN="${MCP_SERVER_API_KEY:-${SUPERVISOR_TOKEN:-${HA_TOKEN:-}}}"
+export MCP_AUTH_TOKEN
+
+if [[ -z "${SUPERVISOR_TOKEN:-}" ]]; then
+  if [[ -z "$MCP_SERVER_URL" || "$MCP_SERVER_URL" == "http://supervisor/core/api/mcp" ]]; then
+    MCP_SERVER_URL="http://homeassistant:8123/api/mcp"
+  fi
+  export MCP_SERVER_URL
+fi
+
+cat > "$CODEX_HOME/config.toml" <<'EOF'
+cli_auth_credentials_store = "file"
+EOF
+
+cat > "$CODEX_HOME/AGENTS.md" <<'EOF'
+# Codexon Home Assistant Context
+
+You are running inside the Home Assistant Codexon add-on.
+
+Use these commands for live Home Assistant context:
+
+- `ha-states`: list all entities, including sensors, binary sensors, switches, lights, automations, scripts, and integrations.
+- `ha-services`: list every service exposed by Home Assistant.
+- `ha-api METHOD /path '{"json":"body"}'`: call the Home Assistant REST API through the Supervisor proxy.
+- `ha-call-service domain service '{"entity_id":"sensor.example"}'`: call a Home Assistant service.
+- `supervisor-api METHOD /path '{"json":"body"}'`: call Supervisor API for add-ons, logs, services, and system management.
+
+Prefer reading live state through `ha-states` and `ha-services` before editing YAML or restarting services.
+EOF
+
+ensure_mcp_server() {
+  local name="$1"
+  shift
+  if codex mcp get "$name" >/dev/null 2>&1; then
+    return 0
+  fi
+  codex mcp add "$name" "$@"
+}
+
+if [[ "$INSTALL_MCP_SERVERS" == "true" ]]; then
+  ensure_mcp_server ha-config -- npx -y @modelcontextprotocol/server-filesystem /ha_config /addon_config /all_addon_configs /addons /share
+  ensure_mcp_server memory -- npx -y @modelcontextprotocol/server-memory
+  if [[ -n "$MCP_SERVER_URL" ]]; then
+    if [[ -n "$MCP_AUTH_TOKEN" ]]; then
+      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL" --bearer-token-env-var MCP_AUTH_TOKEN
+    else
+      ensure_mcp_server remote-home-assistant --url "$MCP_SERVER_URL"
+    fi
+  fi
+fi
+
+
+start_codexon() {
+  local args=(--service)
+  if [[ "$CODEXON_NO_SENSOR_LOOP" == "true" ]]; then
+    args+=(--no-sensor-loop)
+  fi
+  if [[ "$CODEXON_ALLOW_ACTIONS_WITHOUT_CONFIRMATION" == "true" ]]; then
+    args+=(--allow-actions-without-confirmation)
+  fi
+
+  export HA_MCP_URL="${MCP_SERVER_URL:-http://supervisor/core/api/mcp}"
+  export MCP_AUTH_TOKEN
+  export MCP_SERVER_API_KEY
+  export HA_TOKEN
+  export HOME_ASSISTANT_TOKEN="$HA_TOKEN"
+  export HA_LONG_LIVED_TOKEN
+  export CODEXON_DB=/data/codexon/codexon_memory.sqlite3
+  export CODEXON_MODEL_ROUTES=/data/codexon/app/model_routes.yaml
+  export CODEXON_AGENTS_DIR=/data/codexon/app/agents
+  export CODEXON_AGENT_CONFIG=/data/codexon/agent_config.json
+  export CODEXON_CODEX_CONTEXT=/data/codexon/CODEX_CONTEXT.md
+  export CODEXON_CODEX_NOTES=/data/codexon/CODEX_NOTES.md
+  export CODEXON_BACKUP_DIR=/data/codexon/backups
+  export CODEXON_LOG_FILE=/data/codexon/codexon-runtime.log
+  export CODEXON_WORKSPACE="$WORKSPACE"
+  export CODEXON_POLL_SECONDS="$CODEXON_POLL_SECONDS"
+  export CODEXON_SENSOR_PROMPT="$CODEXON_SENSOR_PROMPT"
+  export CODEXON_FS_ROOTS="$CODEXON_FS_ROOTS"
+  export CODEXON_WHATSAPP_ENABLED
+  export CODEXON_WHATSAPP_ALLOWED_SENDERS
+  export CODEXON_WHATSAPP_WAKE_WORDS
+  export CODEXON_WHATSAPP_REJECT_CALLS=true
+  export CODEXON_WHATSAPP_DATA_DIR=/data/codexon/whatsapp
+  export CODEXON_WHATSAPP_BRIDGE=/opt/codexon/whatsapp-core/bridge.mjs
+
+  if [[ -n "${OPENROUTER_API_KEY:-}" && "$CODEXON_ENABLED" == "true" ]]; then
+    echo "[$(date -Is)] Codexon service starting with MCP ${HA_MCP_URL}" >>/data/codexon/codexon-service.log
+    (cd /data/codexon/app && /opt/codexon/bin/python codexon.py "${args[@]}") >>/data/codexon/codexon-service.log 2>&1 &
+  elif [[ "$CODEXON_ENABLED" == "true" ]]; then
+    echo "[$(date -Is)] Codexon service disabled: openrouter_api_key is empty" >>/data/codexon/codexon-service.log
+  fi
+
+  if [[ "$CODEXON_WEB_ENABLED" == "true" ]]; then
+    echo "[$(date -Is)] Codexon web starting on ${CODEXON_WEB_PORT}" >>/data/codexon/codexon-web.log
+    (cd /data/codexon/app && CODEXON_DATA_DIR=/data/codexon /opt/codexon/bin/python -m uvicorn codexon_web:app --host 127.0.0.1 --port "${CODEXON_WEB_PORT}") >>/data/codexon/codexon-web.log 2>&1 &
+  fi
+}
+
+if [[ "$CODEXON_ENABLED" == "true" || "$CODEXON_WEB_ENABLED" == "true" ]]; then
+  start_codexon
+fi
+
+if [[ "$SSH_ENABLED" == "true" ]]; then
+  mkdir -p "$CODEX_HOME/.ssh"
+  jq -r '.ssh_public_keys[]? // empty' "$CONFIG_PATH" > "$CODEX_HOME/.ssh/authorized_keys"
+  chmod 700 "$CODEX_HOME/.ssh"
+  chmod 600 "$CODEX_HOME/.ssh/authorized_keys"
+  /usr/sbin/sshd -D -p 2222 &
+fi
+
+if [[ "$WEB_TERMINAL_ENABLED" == "true" ]]; then
+  mkdir -p /share/codexon
+  {
+    echo "[$(date -Is)] ttyd starting on ${CODEX_TERMINAL_PORT}"
+    ttyd \
+      --port "${CODEX_TERMINAL_PORT}" \
+      --interface 127.0.0.1 \
+      --writable \
+      --terminal-type xterm-256color \
+      --client-option titleFixed="Codexon" \
+      --client-option cursorBlink=true \
+      --client-option cursorStyle=bar \
+      --client-option theme='{"background":"#0b1020","foreground":"#e5e7eb","cursor":"#f97316","selection":"#334155"}' \
+      --client-option disableLeaveAlert=true \
+      /bin/bash /usr/local/bin/web-terminal.sh
+  } >>/share/codexon/web-terminal.log 2>&1 &
+fi
+
+cat >/share/codexon/runtime.txt <<EOF
+Codexon runtime
+
+Workspace: ${WORKSPACE}
+Codex home: ${CODEX_HOME}
+PlatformIO core: ${PLATFORMIO_CORE_DIR}
+Home Assistant API: ${HA_URL}
+Supervisor API: ${SUPERVISOR_URL}
+Home Assistant token configured: $(if [[ -n "${HA_TOKEN:-}" ]]; then echo "yes"; else echo "no"; fi)
+MCP remote configured: $(if [[ -n "${MCP_SERVER_URL:-}" ]]; then echo "yes"; else echo "no"; fi)
+MCP servers: $(codex mcp list 2>/dev/null | tr '\n' '; ' || true)
+Codexon enabled: ${CODEXON_ENABLED}
+Codexon app: /data/codexon/app
+Codexon logs: /data/codexon/codexon-service.log
+Codexon WhatsApp: ${CODEXON_WHATSAPP_ENABLED}
+WhatsApp status/QR: /data/codexon/whatsapp
+Ingress portal port: ${INGRESS_PORT}
+Codex terminal internal port: ${CODEX_TERMINAL_PORT}
+Codexon web internal port: ${CODEXON_WEB_PORT}
+ESPHome: $(esphome-version-check 2>/dev/null || true)
+
+Useful commands:
+  Open the Codexon sidebar panel for a web terminal.
+  codex-login-chatgpt
+  codex --model "${CODEX_MODEL}" "${WORKSPACE}"
+  ha-states
+  ha-services
+  ha-api GET /config
+  ha-call-service light turn_on '{"entity_id":"light.example"}'
+  supervisor-api GET /addons
+  host-shell
+EOF
+
+echo "[codexon] ready"
+echo "[codexon] workspace: ${WORKSPACE}"
+echo "[codexon] require_confirmation: ${REQUIRE_CONFIRMATION}"
+echo "[codexon] ingress portal: port ${INGRESS_PORT}"
+echo "[codexon] web terminal: ${WEB_TERMINAL_ENABLED} internal port ${CODEX_TERMINAL_PORT}"
+echo "[codexon] codexon: ${CODEXON_ENABLED} internal web port ${CODEXON_WEB_PORT}"
+esphome-version-check || true
+echo "[codexon] start a shell with: docker exec -it <container> bash"
+exec nginx -g "daemon off;"

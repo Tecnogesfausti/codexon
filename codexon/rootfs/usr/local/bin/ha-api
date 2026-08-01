@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+METHOD="${1:-GET}"
+PATH_PART="${2:-/}"
+BODY="${3:-}"
+if [[ -n "${SUPERVISOR_TOKEN:-}" ]]; then
+  BASE_URL="http://supervisor/core/api"
+  TOKEN="${SUPERVISOR_TOKEN}"
+else
+  BASE_URL="http://homeassistant:8123/api"
+  TOKEN="${HOME_ASSISTANT_TOKEN:-${HA_LONG_LIVED_TOKEN:-}}"
+fi
+
+if [[ -z "$TOKEN" && -r /data/options.json ]]; then
+  TOKEN="$(jq -r '.home_assistant_token // .ha_long_lived_token // ""' /data/options.json)"
+fi
+
+if [[ -z "$TOKEN" ]]; then
+  echo "Missing home_assistant_token, ha_long_lived_token, or SUPERVISOR_TOKEN" >&2
+  exit 1
+fi
+
+URL="${BASE_URL}${PATH_PART}"
+
+if [[ -n "$BODY" ]]; then
+  curl -fsS -X "$METHOD" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$BODY" \
+    "$URL"
+else
+  curl -fsS -X "$METHOD" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    "$URL"
+fi

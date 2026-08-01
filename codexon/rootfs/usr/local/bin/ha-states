@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ha-api GET /states | jq -r '
+  sort_by(.entity_id)
+  | .[]
+  | [
+      .entity_id,
+      .state,
+      (.attributes.friendly_name // ""),
+      (.last_changed // "")
+    ]
+  | @tsv
+'

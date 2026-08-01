@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ "${1:-}" == "" ]]; then
+  set -- /bin/bash
+fi
+
+exec nsenter --target 1 --mount --uts --ipc --net --pid "$@"

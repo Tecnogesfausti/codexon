@@ -1,0 +1,21 @@
+# Local secrets and Home Assistant add-on options.
+secrets/
+*.secrets.yaml
+*.secrets.yml
+*.secrets.json
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.sqlite
+*.sqlite3
+*.bak-*
+.*_history
+*.log
+
+# Keep examples/templates tracked.
+!*.example.yaml
+!*.example.yml
+!*.example.json
+!.env.example

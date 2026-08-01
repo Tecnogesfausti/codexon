@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+DATA_DIR = Path(os.getenv("CODEXON_DATA_DIR", "/data/codexon"))
+TEACH_DIR = DATA_DIR / "teach"
+LESSONS_JSONL = TEACH_DIR / "lessons.jsonl"
+LATEST_MD = TEACH_DIR / "latest.md"
+CODEX_NOTES = Path(os.getenv("CODEXON_CODEX_NOTES", str(DATA_DIR / "CODEX_NOTES.md")))
+LAST_INTERACTION = DATA_DIR / "last-console-interaction.json"
+RUNTIME_LOG = Path(os.getenv("CODEXON_LOG_FILE", str(DATA_DIR / "codexon-runtime.log")))
+SERVICE_LOG = DATA_DIR / "codexon-service.log"
+WORKSPACE = Path(os.getenv("CODEXON_WORKSPACE") or os.getenv("WORKSPACE") or "/data/codexon/app")
+APP_DIR = DATA_DIR / "app"
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+
+
+def tail(path: Path, lines: int = 80) -> str:
+    if not path.exists():
+        return ""
+    return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:])
+
+
+def read_last_interaction() -> dict[str, Any] | None:
+    if not LAST_INTERACTION.exists():
+        return None
+    try:
+        return json.loads(LAST_INTERACTION.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def write_lesson(record: dict[str, Any]) -> None:
+    TEACH_DIR.mkdir(parents=True, exist_ok=True)
+    with LESSONS_JSONL.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    LATEST_MD.write_text(render_markdown(record), encoding="utf-8")
+    CODEX_NOTES.parent.mkdir(parents=True, exist_ok=True)
+    with CODEX_NOTES.open("a", encoding="utf-8") as handle:
+        handle.write("\n\n" + render_markdown(record))
+
+
+def render_markdown(record: dict[str, Any]) -> str:
+    last = record.get("last_interaction") or {}
+    return f"""# Codexon Teaching Note
+
+Created: {record['created_at']}
+Severity: {record['severity']}
+Topic: {record['topic']}
+
+## User Instruction
+
+{record['instruction']}
+
+## Expected Behaviour
+
+{record['expected'] or '_No especificado._'}
+
+## Observed Problem
+
+{record['observed'] or '_No especificado._'}
+
+## Last Console Interaction
+
+```json
+{json.dumps(last, ensure_ascii=False, indent=2)}
+```
+
+## Error Class
+
+{record['error_class']}
+
+## Relevant Logs
+
+### Codexon runtime
+
+```text
+{record['runtime_log'] or 'Sin logs.'}
+```
+
+### Codexon service
+
+```text
+{record['service_log'] or 'Sin logs.'}
+```
+
+## Codex Task
+
+Reproduce the issue from `/data/codexon/teach/latest.md`, inspect `/data/codexon/app`, fix Codexon code or prompts, run the available tests, and explain the change. Prefer deterministic tools for Home Assistant lookups when possible.
+"""
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Registra una leccion para que Codex corrija Codexon.")
+    parser.add_argument("instruction", nargs="*", help="Tema o instruccion de correccion.")
+    parser.add_argument("--expected", default="", help="Comportamiento esperado.")
+    parser.add_argument("--observed", default="", help="Problema observado.")
+    parser.add_argument("--severity", default="normal", choices=["low", "normal", "high"], help="Severidad.")
+    parser.add_argument("--error-class", default="TEACHING_NOTE", help="Codigo identificable del error.")
+    parser.add_argument("--codex", action="store_true", help="Abre Codex directamente con la nota generada.")
+    args = parser.parse_args()
+
+    instruction = " ".join(args.instruction).strip()
+    if not instruction:
+        instruction = "Revisa la ultima interaccion y corrige Codexon para que responda mejor."
+
+    record = {
+        "created_at": utc_now(),
+        "topic": instruction[:120],
+        "instruction": instruction,
+        "expected": args.expected,
+        "observed": args.observed,
+        "severity": args.severity,
+        "error_class": args.error_class,
+        "app_dir": str(APP_DIR),
+        "workspace": str(WORKSPACE),
+        "last_interaction": read_last_interaction(),
+        "runtime_log": tail(RUNTIME_LOG, 80),
+        "service_log": tail(SERVICE_LOG, 80),
+    }
+    write_lesson(record)
+
+    print(f"Leccion registrada: {LATEST_MD}")
+    print(f"Historial: {LESSONS_JSONL}")
+    print("\nPara corregir con Codex:")
+    print(f"  codex --model \"$CODEX_MODEL\" {APP_DIR}")
+    print("  Pidele: revisa /data/codexon/teach/latest.md y corrige Codexon.")
+
+    if args.codex:
+        prompt = "Revisa /data/codexon/teach/latest.md y corrige Codexon. Haz cambios pequenos, verifica y explica."
+        os.chdir(APP_DIR)
+        subprocess.run(["codex", "--model", os.getenv("CODEX_MODEL", "gpt-5.3-codex"), prompt], check=False)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

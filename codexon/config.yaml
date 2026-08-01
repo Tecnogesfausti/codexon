@@ -1,0 +1,125 @@
+name: Codexon
+slug: codexon
+version: "0.3.0"
+description: Codex CLI agent with broad Home Assistant Supervisor access
+url: https://github.com/Tecnogesfausti/codexon
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: false
+stage: experimental
+ingress: true
+ingress_port: 8099
+ingress_stream: true
+panel_icon: mdi:robot
+panel_title: Codexon
+panel_admin: true
+homeassistant_api: true
+hassio_api: true
+hassio_role: admin
+docker_api: true
+host_network: true
+host_dbus: true
+host_ipc: true
+host_pid: true
+host_uts: true
+full_access: true
+apparmor: false
+protected: false
+udev: true
+kernel_modules: true
+stdin: true
+privileged:
+  - DAC_READ_SEARCH
+  - NET_ADMIN
+  - NET_RAW
+  - SYS_ADMIN
+  - SYS_MODULE
+  - SYS_PTRACE
+  - SYS_RAWIO
+  - SYS_RESOURCE
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /ha_config
+  - type: addon_config
+    read_only: false
+    path: /addon_config
+  - type: all_addon_configs
+    read_only: false
+    path: /all_addon_configs
+  - type: addons
+    read_only: false
+    path: /addons
+  - type: share
+    read_only: false
+    path: /share
+  - type: media
+    read_only: false
+    path: /media
+  - type: backup
+    read_only: false
+    path: /backup
+  - type: ssl
+    read_only: false
+    path: /ssl
+ports:
+  2222/tcp: null
+ports_description:
+  2222/tcp: Optional SSH access to the agent container
+options:
+  openai_api_key: ""
+  openrouter_api_key: ""
+  home_assistant_token: ""
+  ha_long_lived_token: ""
+  mcp_server_url: ""
+  mcp_server_api_key: ""
+  codex_model: "gpt-5.3-codex"
+  codex_home: "/data/codex"
+  workspace: "/ha_config"
+  web_terminal_enabled: true
+  ingress_target: "codex"
+  require_confirmation: true
+  install_mcp_servers: true
+  ssh_enabled: false
+  ssh_public_keys: []
+  codexon_enabled: true
+  codexon_web_enabled: true
+  codexon_poll_seconds: 300
+  codexon_sensor_prompt: "Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen."
+  codexon_fs_roots: "/ha_config,/addon_config,/share"
+  codexon_no_sensor_loop: false
+  codexon_allow_actions_without_confirmation: false
+  codexon_whatsapp_enabled: false
+  codexon_whatsapp_allowed_senders: []
+  codexon_whatsapp_wake_words: "casa|huerto|asistente|ia|robot"
+schema:
+  openai_api_key: "password?"
+  openrouter_api_key: "password?"
+  home_assistant_token: "password?"
+  ha_long_lived_token: "password?"
+  mcp_server_url: "str?"
+  mcp_server_api_key: "password?"
+  codex_model: "str"
+  codex_home: "str"
+  workspace: "str"
+  web_terminal_enabled: "bool"
+  ingress_target: "str"
+  require_confirmation: "bool"
+  install_mcp_servers: "bool"
+  ssh_enabled: "bool"
+  ssh_public_keys:
+    - "str"
+  codexon_enabled: "bool"
+  codexon_web_enabled: "bool"
+  codexon_poll_seconds: "int(30,86400)"
+  codexon_sensor_prompt: "str"
+  codexon_fs_roots: "str"
+  codexon_no_sensor_loop: "bool"
+  codexon_allow_actions_without_confirmation: "bool"
+  codexon_whatsapp_enabled: "bool"
+  codexon_whatsapp_allowed_senders:
+    - "str"
+  codexon_whatsapp_wake_words: "str?"

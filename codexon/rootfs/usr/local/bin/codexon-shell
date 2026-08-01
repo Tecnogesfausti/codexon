@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export CODEX_HOME="${CODEX_HOME:-/data/codex}"
+export HOME="$CODEX_HOME"
+export WORKSPACE="${WORKSPACE:-/ha_config}"
+export HA_URL="${HA_URL:-http://supervisor/core/api}"
+export SUPERVISOR_URL="${SUPERVISOR_URL:-http://supervisor}"
+
+if [[ -r /data/options.json ]]; then
+  export HOME_ASSISTANT_TOKEN="${HOME_ASSISTANT_TOKEN:-$(jq -r '.home_assistant_token // .ha_long_lived_token // ""' /data/options.json)}"
+  export HA_LONG_LIVED_TOKEN="${HA_LONG_LIVED_TOKEN:-$(jq -r '.ha_long_lived_token // ""' /data/options.json)}"
+  export MCP_SERVER_URL="${MCP_SERVER_URL:-$(jq -r '.mcp_server_url // ""' /data/options.json)}"
+  export MCP_SERVER_API_KEY="${MCP_SERVER_API_KEY:-$(jq -r '.mcp_server_api_key // ""' /data/options.json)}"
+  export CODEX_MODEL="${CODEX_MODEL:-$(jq -r '.codex_model // "gpt-5.3-codex"' /data/options.json)}"
+fi
+
+cd "$WORKSPACE"
+
+cat <<'EOF'
+Codexon terminal
+
+Comandos principales:
+  codex --model "$CODEX_MODEL" "$WORKSPACE"
+      Modificar, enseñar, corregir y ampliar Codexon o Home Assistant.
+
+  codexon-console
+      Control del servicio Codexon: estado, tareas, agentes, logs y contexto.
+
+  codexon-chat
+      Chat completo de codexon.py con memoria, MCP y herramientas.
+
+  codexon-teach "tema a corregir"
+      Registra una leccion para que Codex corrija Codexon.
+
+Otros comandos utiles:
+  codex-login-chatgpt
+  ha-states
+  ha-services
+  supervisor-api GET /addons
+  host-shell
+
+EOF
+
+exec tmux new-session -A -s codexon /bin/bash -l

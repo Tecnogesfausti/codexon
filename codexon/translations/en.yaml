@@ -1,0 +1,68 @@
+configuration:
+  openai_api_key:
+    name: OpenAI API key
+    description: Optional API key used by Codex CLI.
+  openrouter_api_key:
+    name: OpenRouter API key
+    description: Optional API key used by the embedded Codexon service.
+  ha_long_lived_token:
+    name: Home Assistant long-lived token legacy alias
+    description: Deprecated alias for home_assistant_token.
+  home_assistant_token:
+    name: Home Assistant API token
+    description: Dedicated long-lived token for Home Assistant API calls.
+  mcp_server_url:
+    name: MCP server URL
+    description: Optional remote Model Context Protocol Server URL.
+  mcp_server_api_key:
+    name: MCP server API key
+    description: Optional API key sent to the remote MCP server.
+  codex_model:
+    name: Codex model
+    description: Model passed to Codex CLI by default.
+  codex_home:
+    name: Codex home
+    description: Persistent home directory for Codex.
+  workspace:
+    name: Workspace
+    description: Default directory where Codex should work.
+  web_terminal_enabled:
+    name: Web terminal enabled
+    description: Enable the Home Assistant sidebar terminal through Ingress.
+  ingress_target:
+    name: Legacy Ingress target
+    description: Deprecated compatibility option. The single Ingress portal now contains both the Codexon statistics and Codex terminal tabs.
+  require_confirmation:
+    name: Require confirmation
+    description: Keep manual confirmation enabled for agent actions.
+  install_mcp_servers:
+    name: Install MCP servers
+    description: Generate default filesystem and memory MCP server configuration.
+  ssh_enabled:
+    name: SSH enabled
+    description: Enable SSH access on port 2222.
+  ssh_public_keys:
+    name: SSH public keys
+    description: Public keys allowed to access the agent container.
+
+  codexon_enabled:
+    name: Codexon service enabled
+    description: Start Codexon as a background 24/7 service inside this Codex add-on.
+  codexon_web_enabled:
+    name: Codexon web panel enabled
+    description: Show the optional Codexon statistics panel through the shared Ingress portal.
+  codexon_poll_seconds:
+    name: Codexon poll seconds
+    description: Sensor polling interval for the Codexon service.
+  codexon_sensor_prompt:
+    name: Codexon sensor prompt
+    description: Prompt used by Codexon for periodic sensor observation.
+  codexon_fs_roots:
+    name: Codexon filesystem roots
+    description: Comma-separated writable/readable roots available to Codexon tools.
+  codexon_no_sensor_loop:
+    name: Disable Codexon sensor loop
+    description: Start Codexon without the periodic sensor loop.
+  codexon_allow_actions_without_confirmation:
+    name: Allow Codexon actions without confirmation
+    description: Permit Codexon to execute actions without explicit confirmation. Use with care.

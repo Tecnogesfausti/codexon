@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Codexon</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --panel: #111827;
+      --border: #273449;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #f97316;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+    body { display: grid; grid-template-rows: 48px minmax(0, 1fr); }
+    header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+    .brand { margin-right: auto; padding: 0 8px; font-weight: 700; white-space: nowrap; }
+    button { min-height: 34px; padding: 0 14px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--muted); font: inherit; font-weight: 650; cursor: pointer; }
+    button.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); }
+    main { position: relative; min-width: 0; min-height: 0; }
+    iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: var(--bg); visibility: hidden; pointer-events: none; }
+    iframe.active { visibility: visible; pointer-events: auto; }
+    @media (max-width: 520px) {
+      .brand { display: none; }
+      header { justify-content: center; }
+      button { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Codexon</div>
+    <button type="button" data-view="stats" class="active">Estadísticas</button>
+    <button type="button" data-view="terminal">Terminal</button>
+  </header>
+  <main>
+    <iframe id="stats" class="active" src="./stats/" title="Estadísticas Codexon"></iframe>
+    <iframe id="terminal" src="./terminal/" title="Terminal Codex" allow="clipboard-read; clipboard-write" allowfullscreen></iframe>
+  </main>
+  <script>
+    const frames = Object.fromEntries([...document.querySelectorAll('iframe')].map(frame => [frame.id, frame]));
+    function selectView(name) {
+      document.querySelectorAll('button[data-view]').forEach(button => button.classList.toggle('active', button.dataset.view === name));
+      Object.entries(frames).forEach(([key, frame]) => frame.classList.toggle('active', key === name));
+      history.replaceState(null, '', '#' + name);
+      if (name === 'terminal') {
+        frames.terminal.focus();
+        try { frames.terminal.contentWindow.focus(); } catch (_) {}
+      }
+    }
+    document.querySelectorAll('button[data-view]').forEach(button => button.addEventListener('click', () => selectView(button.dataset.view)));
+    selectView(location.hash === '#terminal' ? 'terminal' : 'stats');
+  </script>
+</body>
+</html>

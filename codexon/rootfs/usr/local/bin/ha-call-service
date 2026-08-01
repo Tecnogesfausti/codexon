@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+DOMAIN="${1:?Usage: ha-call-service <domain> <service> [json_body]}"
+SERVICE="${2:?Usage: ha-call-service <domain> <service> [json_body]}"
+BODY="${3:-{}}"
+
+ha-api POST "/services/${DOMAIN}/${SERVICE}" "$BODY"

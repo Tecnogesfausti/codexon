@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import cmd
+import datetime as dt
+import json
+import os
+import subprocess
+import time
+import shlex
+import sys
+import textwrap
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+try:
+    import readline
+except ImportError:  # pragma: no cover
+    readline = None  # type: ignore[assignment]
+
+DEFAULT_URLS = ("http://127.0.0.1:8098",)
+HISTORY_PATH = Path(os.getenv("CODEXON_CONSOLE_HISTORY", "/data/codexon/codexon-console-history"))
+LAST_INTERACTION_PATH = Path(os.getenv("CODEXON_LAST_INTERACTION", "/data/codexon/last-console-interaction.json"))
+
+
+def utc_now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat(timespec="seconds")
+
+
+class CodexonClient:
+    def __init__(self, base_url: str | None = None) -> None:
+        self.base_url = (base_url or self.discover_base_url()).rstrip("/")
+
+    def discover_base_url(self) -> str:
+        env_url = os.getenv("CODEXON_API_URL")
+        if env_url:
+            return env_url
+        for url in DEFAULT_URLS:
+            try:
+                self.request("GET", "/api/status", base_url=url, timeout=1.5)
+                return url
+            except Exception:
+                continue
+        return DEFAULT_URLS[0]
+
+    def request(self, method: str, path: str, payload: dict[str, Any] | None = None, *, base_url: str | None = None, timeout: float = 10.0) -> Any:
+        url = (base_url or self.base_url).rstrip("/") + path
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method=method.upper(), headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                body = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"No puedo conectar con Codexon en {url}: {exc.reason}") from exc
+        return json.loads(body) if body else None
+
+    def get(self, path: str) -> Any:
+        return self.request("GET", path)
+
+    def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
+        return self.request("POST", path, payload or {})
+
+    def patch(self, path: str, payload: dict[str, Any]) -> Any:
+        return self.request("PATCH", path, payload)
+
+    def delete(self, path: str) -> Any:
+        return self.request("DELETE", path)
+
+
+def save_last_interaction(record: dict[str, Any]) -> None:
+    LAST_INTERACTION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LAST_INTERACTION_PATH.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def error_class_for_task(row: dict[str, Any] | None) -> str:
+    if row is None:
+        return "ERROR_TIMEOUT"
+    status = str(row.get("status") or "")
+    if status == "done":
+        return "OK"
+    if status == "failed":
+        return "ERROR_TASK_FAILED"
+    if status == "cancelled":
+        return "ERROR_TASK_CANCELLED"
+    return f"TASK_STATUS_{status.upper() or 'UNKNOWN'}"
+
+
+def print_table(rows: list[dict[str, Any]], columns: list[str], limit: int = 80) -> None:
+    if not rows:
+        print("Sin datos.")
+        return
+    widths = {col: min(max(len(col), *(len(str(row.get(col, ""))) for row in rows)), 42) for col in columns}
+    print("  ".join(col.ljust(widths[col]) for col in columns))
+    print("  ".join("-" * widths[col] for col in columns))
+    for row in rows[:limit]:
+        cells = []
+        for col in columns:
+            value = str(row.get(col, ""))
+            value = value.replace("\n", " ")
+            if len(value) > widths[col]:
+                value = value[: widths[col] - 1] + "…"
+            cells.append(value.ljust(widths[col]))
+        print("  ".join(cells))
+
+
+class CodexonConsole(cmd.Cmd):
+    intro = "Codexon console conectada al servicio. Escribe /help para comandos."
+    prompt = "Codexon servicio> "
+
+    def __init__(self, client: CodexonClient) -> None:
+        super().__init__()
+        self.client = client
+        self._setup_history()
+
+    def _setup_history(self) -> None:
+        if readline is None:
+            return
+        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if HISTORY_PATH.exists():
+            try:
+                readline.read_history_file(str(HISTORY_PATH))
+            except OSError:
+                pass
+
+    def postloop(self) -> None:
+        if readline is not None:
+            try:
+                readline.write_history_file(str(HISTORY_PATH))
+            except OSError:
+                pass
+
+    def onecmd(self, line: str) -> bool:
+        try:
+            result = super().onecmd(line)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error: {exc}")
+            return False
+        return bool(result)
+
+    def emptyline(self) -> None:
+        return
+
+    def default(self, line: str) -> None:
+        if not line.strip():
+            return
+        if line.startswith("/"):
+            command, _, rest = line[1:].partition(" ")
+            method = getattr(self, f"do_{command.replace('-', '_')}", None)
+            if method:
+                method(rest)
+                return
+            print("Comando no reconocido. Usa /help.")
+            return
+        self.chat(line.strip())
+
+    def chat(self, instruction: str) -> None:
+        title = instruction[:72] + ("…" if len(instruction) > 72 else "")
+        result = self.client.post(
+            "/api/tasks",
+            {"title": f"Chat: {title}", "instruction": instruction, "run_at": utc_now(), "priority": 80},
+        )
+        task_id = int(result.get("id"))
+        print(f"Tarea chat #{task_id} enviada. Esperando resultado...")
+        final = self.wait_task(task_id, timeout_seconds=90)
+        record = {
+            "created_at": utc_now(),
+            "kind": "chat",
+            "instruction": instruction,
+            "task_id": task_id,
+            "final": final,
+            "error_class": error_class_for_task(final),
+        }
+        save_last_interaction(record)
+        if final is None:
+            print(f"[ERROR_TIMEOUT] Sigue en curso. Mira /tareas o /logs. ID: {task_id}")
+            return
+        status = final.get("status")
+        if status == "done":
+            print(final.get("result") or "Tarea completada sin texto de resultado.")
+        elif status == "failed":
+            print(f"[ERROR_TASK_FAILED] Error en tarea #{task_id}: {final.get('last_error') or 'sin detalle'}")
+        else:
+            print(f"[{record['error_class']}] Tarea #{task_id}: {status}")
+
+    def wait_task(self, task_id: int, timeout_seconds: int = 90) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            rows = self.client.get("/api/tasks?limit=80&include_done=true")
+            for row in rows:
+                if int(row.get("id", -1)) == task_id:
+                    if row.get("status") in {"done", "failed", "cancelled"}:
+                        return row
+                    break
+            time.sleep(2)
+        return None
+
+    def do_help(self, arg: str) -> None:  # noqa: ARG002
+        print(textwrap.dedent(
+            """
+            Escribe texto libre para chatear con el servicio Codexon.
+            Ejemplo: busca retenciones cerca de casa
+
+            Comandos:
+              /estado                         Estado del servicio y memoria
+              /logs [n]                        Ultimas lineas de log
+              /tareas                          Lista tareas
+              /crear <titulo> | <instruccion>  Crea tarea pendiente ahora
+              /crear_en <ISO> | <titulo> | <instruccion>
+              /ejecutar <id>                   Marca tarea para ejecutar ya
+              /cancelar <id>                   Cancela tarea
+              /eliminar <id>                   Elimina tarea
+              /agentes                         Lista agentes
+              /agente <nombre>                 Ejecuta agente manualmente
+              /observaciones                   Ultimas observaciones
+              /contexto                        Refresca contexto Codex
+              /ensenar <tema>                  Registra la ultima interaccion para que Codex corrija Codexon
+              /corregir <tema>                 Igual que /ensenar, pero abre Codex directamente
+              /url [url]                       Muestra o cambia API URL
+              /salir                           Salir
+            """
+        ).strip())
+
+    def do_estado(self, arg: str) -> None:  # noqa: ARG002
+        data = self.client.get("/api/status")
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+
+    def do_logs(self, arg: str) -> None:
+        limit = arg.strip() or "80"
+        data = self.client.get(f"/api/logs?limit={limit}")
+        print("\n".join(data.get("lines", [])) or "Sin logs.")
+
+    def do_tareas(self, arg: str) -> None:  # noqa: ARG002
+        rows = self.client.get("/api/tasks?limit=50&include_done=true")
+        print_table(rows, ["id", "status", "run_at", "priority", "title", "result", "last_error"])
+
+    def do_crear(self, arg: str) -> None:
+        title, instruction = self._split_required(arg, 2, "Uso: /crear <titulo> | <instruccion>")
+        result = self.client.post("/api/tasks", {"title": title, "instruction": instruction, "run_at": utc_now(), "priority": 50})
+        print(f"Tarea creada #{result.get('id')}")
+
+    def do_crear_en(self, arg: str) -> None:
+        run_at, title, instruction = self._split_required(arg, 3, "Uso: /crear_en <ISO> | <titulo> | <instruccion>")
+        result = self.client.post("/api/tasks", {"title": title, "instruction": instruction, "run_at": run_at, "priority": 50})
+        print(f"Tarea creada #{result.get('id')}")
+
+    def do_ejecutar(self, arg: str) -> None:
+        task_id = self._id(arg)
+        self.client.post(f"/api/tasks/{task_id}/run")
+        print(f"Tarea #{task_id} preparada para ejecutar.")
+
+    def do_cancelar(self, arg: str) -> None:
+        task_id = self._id(arg)
+        self.client.post(f"/api/tasks/{task_id}/cancel")
+        print(f"Tarea #{task_id} cancelada.")
+
+    def do_eliminar(self, arg: str) -> None:
+        task_id = self._id(arg)
+        self.client.delete(f"/api/tasks/{task_id}")
+        print(f"Tarea #{task_id} eliminada.")
+
+    def do_agentes(self, arg: str) -> None:  # noqa: ARG002
+        data = self.client.get("/api/agents")
+        print_table(data.get("agents", []), ["name", "enabled", "effective_frequency_seconds", "effective_priority", "description"])
+
+    def do_agente(self, arg: str) -> None:
+        name = arg.strip()
+        if not name:
+            print("Uso: /agente <nombre>")
+            return
+        result = self.client.post(f"/api/agents/{name}/run")
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    def do_observaciones(self, arg: str) -> None:  # noqa: ARG002
+        rows = self.client.get("/api/observations?limit=30")
+        print_table(rows, ["created_at", "source", "summary"])
+
+    def do_contexto(self, arg: str) -> None:  # noqa: ARG002
+        result = self.client.post("/api/codex/context/refresh")
+        print(f"Contexto actualizado: {result.get('path')}")
+
+
+    def do_ensenar(self, arg: str) -> None:
+        topic = arg.strip() or "Corrige la ultima respuesta de Codexon"
+        subprocess.run(["codexon-teach", "--error-class", "USER_TEACHING", topic], check=False)
+
+    def do_corregir(self, arg: str) -> None:
+        topic = arg.strip() or "Corrige la ultima respuesta de Codexon"
+        subprocess.run(["codexon-teach", "--error-class", "USER_TEACHING", "--codex", topic], check=False)
+
+    def do_url(self, arg: str) -> None:
+        value = arg.strip()
+        if value:
+            self.client.base_url = value.rstrip("/")
+        print(f"API URL: {self.client.base_url}")
+
+    def do_salir(self, arg: str) -> bool:  # noqa: ARG002
+        return True
+
+    def do_exit(self, arg: str) -> bool:  # noqa: ARG002
+        return True
+
+    def do_EOF(self, arg: str) -> bool:  # noqa: N802, ARG002
+        print()
+        return True
+
+    def _split_required(self, text: str, count: int, usage: str) -> list[str]:
+        parts = [part.strip() for part in text.split("|")]
+        if len(parts) != count or any(not part for part in parts):
+            print(usage)
+            raise ValueError(usage)
+        return parts
+
+    def _id(self, text: str) -> int:
+        try:
+            return int(shlex.split(text)[0])
+        except Exception as exc:
+            raise ValueError("Debes indicar un ID numerico") from exc
+
+
+def main() -> int:
+    client = CodexonClient(sys.argv[1] if len(sys.argv) > 1 else None)
+    try:
+        client.get("/api/status")
+    except Exception as exc:
+        print(exc, file=sys.stderr)
+        print("Arranca la web de Codexon con codexon_web_enabled=true.", file=sys.stderr)
+        return 2
+    CodexonConsole(client).cmdloop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

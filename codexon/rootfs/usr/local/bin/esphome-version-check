@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CURRENT=""
+LATEST=""
+
+if command -v esphome >/dev/null 2>&1; then
+  CURRENT="$(esphome version 2>/dev/null | grep -Eo '[0-9]{4}\.[0-9]+\.[0-9]+' | head -n 1 || true)"
+fi
+
+LATEST="$(curl -fsSL --connect-timeout 5 --max-time 10 https://pypi.org/pypi/esphome/json 2>/dev/null | jq -r '.info.version // empty' 2>/dev/null || true)"
+
+if [[ -z "$CURRENT" ]]; then
+  echo "[codexon] ESPHome CLI installed, but current version could not be detected"
+  exit 0
+fi
+
+if [[ -z "$LATEST" ]]; then
+  echo "[codexon] ESPHome CLI ${CURRENT}; latest version check unavailable"
+  exit 0
+fi
+
+if [[ "$CURRENT" == "$LATEST" ]]; then
+  echo "[codexon] ESPHome CLI ${CURRENT} is current"
+else
+  echo "[codexon] ESPHome CLI ${CURRENT} installed; newer version available: ${LATEST}"
+fi

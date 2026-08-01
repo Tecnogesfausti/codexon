@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+CONFIG_PATH=/data/options.json
+LOCK_PATH=/data/codexon/codexon-chat.lock
+
+read_option() {
+  local key="$1"
+  local fallback="${2:-}"
+  if [[ -r "$CONFIG_PATH" ]]; then
+    jq -r --arg key "$key" --arg fallback "$fallback" '.[$key] // $fallback' "$CONFIG_PATH"
+  else
+    printf '%s\n' "$fallback"
+  fi
+}
+
+read_bool() {
+  local key="$1"
+  if [[ -r "$CONFIG_PATH" ]]; then
+    jq -r --arg key "$key" '.[$key] // false' "$CONFIG_PATH"
+  else
+    printf 'false\n'
+  fi
+}
+
+mkdir -p /data/codexon
+if [[ ! -f /data/codexon/app/codexon.py ]]; then
+  mkdir -p /data/codexon/app
+  rsync -a /opt/codexon/app/ /data/codexon/app/
+fi
+
+export OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-$(read_option openrouter_api_key)}"
+export HOME_ASSISTANT_TOKEN="${HOME_ASSISTANT_TOKEN:-$(read_option home_assistant_token)}"
+export HA_LONG_LIVED_TOKEN="${HA_LONG_LIVED_TOKEN:-$(read_option ha_long_lived_token)}"
+export MCP_SERVER_URL="${MCP_SERVER_URL:-$(read_option mcp_server_url)}"
+export MCP_SERVER_API_KEY="${MCP_SERVER_API_KEY:-$(read_option mcp_server_api_key)}"
+export CODEX_MODEL="${CODEX_MODEL:-$(read_option codex_model gpt-5.3-codex)}"
+export CODEX_HOME="${CODEX_HOME:-$(read_option codex_home /data/codex)}"
+export WORKSPACE="${WORKSPACE:-$(read_option workspace /ha_config)}"
+export CODEXON_POLL_SECONDS="$(read_option codexon_poll_seconds 300)"
+export CODEXON_SENSOR_PROMPT="$(read_option codexon_sensor_prompt 'Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen.')"
+export CODEXON_FS_ROOTS="$(read_option codexon_fs_roots /ha_config,/addon_config,/share)"
+
+if [[ -n "$HOME_ASSISTANT_TOKEN" ]]; then
+  export HA_TOKEN="$HOME_ASSISTANT_TOKEN"
+elif [[ -n "$HA_LONG_LIVED_TOKEN" ]]; then
+  export HA_TOKEN="$HA_LONG_LIVED_TOKEN"
+else
+  export HA_TOKEN="${SUPERVISOR_TOKEN:-}"
+fi
+
+export MCP_AUTH_TOKEN="${MCP_SERVER_API_KEY:-${SUPERVISOR_TOKEN:-${HA_TOKEN:-}}}"
+if [[ -z "${SUPERVISOR_TOKEN:-}" && ( -z "$MCP_SERVER_URL" || "$MCP_SERVER_URL" == "http://supervisor/core/api/mcp" ) ]]; then
+  export MCP_SERVER_URL="http://homeassistant:8123/api/mcp"
+fi
+export HA_MCP_URL="${MCP_SERVER_URL:-http://supervisor/core/api/mcp}"
+
+export HOME="$CODEX_HOME"
+export HOME_ASSISTANT_TOKEN="$HA_TOKEN"
+export CODEXON_DB=/data/codexon/codexon_memory.sqlite3
+export CODEXON_MODEL_ROUTES=/data/codexon/app/model_routes.yaml
+export CODEXON_AGENTS_DIR=/data/codexon/app/agents
+export CODEXON_AGENT_CONFIG=/data/codexon/agent_config.json
+export CODEXON_CODEX_CONTEXT=/data/codexon/CODEX_CONTEXT.md
+export CODEXON_CODEX_NOTES=/data/codexon/CODEX_NOTES.md
+export CODEXON_BACKUP_DIR=/data/codexon/backups
+export CODEXON_LOG_FILE=/data/codexon/codexon-runtime.log
+export CODEXON_WORKSPACE="$WORKSPACE"
+
+if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+  echo "Falta openrouter_api_key en la configuración del add-on." >&2
+  exit 2
+fi
+if [[ -z "${HA_MCP_URL:-}" ]]; then
+  echo "Falta mcp_server_url/HA_MCP_URL para conectar con Home Assistant MCP." >&2
+  exit 2
+fi
+if [[ -z "${MCP_AUTH_TOKEN:-}" ]]; then
+  echo "Falta token MCP: configura mcp_server_api_key, home_assistant_token o usa SUPERVISOR_TOKEN." >&2
+  exit 2
+fi
+
+allow_actions="$(read_bool codexon_allow_actions_without_confirmation)"
+args=(--no-sensor-loop)
+if [[ "$allow_actions" == "true" ]]; then
+  args+=(--allow-actions-without-confirmation)
+fi
+
+exec 9>"$LOCK_PATH"
+if ! flock -n 9; then
+  echo "Ya hay una sesión codexon-chat abierta. Cierra esa sesión antes de abrir otra." >&2
+  exit 1
+fi
+
+cat <<EOF
+Codexon chat completo
+
+- Usa memoria, OpenRouter, MCP y herramientas del codexon.py real.
+- Arranca siempre con --no-sensor-loop para no duplicar observadores 24/7.
+- Comparte la misma base de datos del servicio: $CODEXON_DB
+- Para controlar el servicio sin chat completo usa: codexon-console
+
+EOF
+
+cd /data/codexon/app
+exec /opt/codexon/bin/python codexon.py "${args[@]}"

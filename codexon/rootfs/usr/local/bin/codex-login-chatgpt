@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+echo "Starting Codex ChatGPT login using device authentication."
+echo "Open the URL shown by Codex in your browser and enter the one-time code."
+echo "Credentials will be stored under CODEX_HOME, usually /data/codex/auth.json."
+exec codex login --device-auth

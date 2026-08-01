@@ -1,0 +1,7 @@
+openai>=1.40.0
+mcp>=1.2.0,<2
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0

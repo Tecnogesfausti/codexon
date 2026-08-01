@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+*.sqlite
+*.sqlite-*
+*.log
+*.tar.gz
+*.bak
+*.bak-*
+*.backup
+*.out
+.env
+site.yaml
+site.local.yaml
+
+# Runtime local
+.codexon_history
+mareo.txt
+temps.hoy
+data/
