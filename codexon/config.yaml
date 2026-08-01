@@ -1,6 +1,6 @@
 name: Codexon
 slug: codexon
-version: "0.3.0"
+version: "0.3.1"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/codexon
 arch:
@@ -20,7 +20,7 @@ homeassistant_api: true
 hassio_api: true
 hassio_role: admin
 docker_api: true
-host_network: true
+host_network: false
 host_dbus: true
 host_ipc: true
 host_pid: true

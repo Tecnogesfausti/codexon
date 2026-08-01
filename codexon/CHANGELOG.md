@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Codexon usa una red de contenedor aislada para poder convivir con instalaciones anteriores sin competir por el puerto Ingress interno `8099`.
+
 ## 0.3.0
 
 - Trasladado el add-on y el núcleo Codexon al monorepo `Tecnogesfausti/codexon`.

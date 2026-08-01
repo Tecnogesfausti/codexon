@@ -247,7 +247,7 @@ Este add-on se declara con:
 - `full_access: true`
 - `protected: false`
 - `apparmor: false`
-- `host_pid`, `host_network`, `host_dbus`, `host_ipc`, `host_uts`
+- `host_pid`, `host_dbus`, `host_ipc`, `host_uts`
 - `hassio_role: admin`
 - montajes RW de configuración y add-ons
 
