@@ -6,12 +6,20 @@ import datetime as dt
 from unittest.mock import patch
 
 from automation import decode_plan, encode_plan
+from intent.environment import requested_environment_sensor
 from codexon import (
     CodexonAgent,
+    answer_contains_attributed_measurement,
+    attributed_measurement_period_error,
+    canonical_statistical_period,
     completion_notification_requested,
     critical_action_requested,
+    explicit_whatsapp_send_intent,
     historical_active_device_measurement_intent,
     lexical_correction_suggestion,
+    mobile_notification_explicitly_requested,
+    parse_semantic_statistical_plan,
+    parse_attributed_measurement_result,
     requested_ac_pvpc_valley_plan,
     requested_ac_until_price_drop_plan,
     requested_history_date,
@@ -19,6 +27,8 @@ from codexon import (
     requested_weekday_date,
     scheduling_intent_hint,
     should_offer_critical_completion_alert,
+    statistical_answer_is_complete,
+    statistical_answer_period_is_consistent,
     task_recovery_policy,
 )
 from site_profile import SiteProfile
@@ -134,6 +144,103 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
             readonly_entity_inventory_intent("enciende todos los grifos de la huerta")
         )
 
+    def test_environment_shortcut_does_not_intercept_statistics(self) -> None:
+        class EnvironmentProfile:
+            def entities(self, role: str) -> list[str]:
+                return ["sensor.casa_temperature"] if role == "environment.indoor_temperature" else []
+
+            def binding(self, role: str) -> dict[str, str]:
+                return {"label": "temperatura de casa"} if role == "environment.indoor_temperature" else {}
+
+        profile = EnvironmentProfile()
+        current = requested_environment_sensor(
+            "cual es la temperatura de la casa", profile
+        )
+        historical = requested_environment_sensor(
+            "cual fue la temperatura maxima de la casa", profile
+        )
+
+        self.assertIsNotNone(current)
+        self.assertIsNone(historical)
+
+    def test_semantic_statistical_plan_is_structured_not_phrase_bound(self) -> None:
+        plan = parse_semantic_statistical_plan(
+            json.dumps(
+                {
+                    "kind": "statistical",
+                    "metric": "temperatura interior",
+                    "aggregation": "maximum",
+                    "scope": "casa",
+                    "period_status": "explicit",
+                    "period_text": "esta semana",
+                    "period_kind": "current_week",
+                    "start_time": "",
+                    "end_time": "",
+                    "rolling_days": 0,
+                    "clarification_question": "",
+                    "needs_activity_attribution": False,
+                    "activity_scope": "",
+                }
+            )
+        )
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.aggregation, "maximum")
+        self.assertEqual(plan.scope, "casa")
+        period = canonical_statistical_period(
+            plan,
+            now=dt.datetime.fromisoformat("2026-08-02T10:00:00+02:00"),
+        )
+        self.assertEqual(period[0], "2026-07-27T00:00:00+02:00")
+        self.assertEqual(period[1], "2026-08-02T10:00:00+02:00")
+        self.assertIsNone(
+            parse_semantic_statistical_plan('{"kind":"other"}')
+        )
+
+    def test_statistical_answer_cannot_be_only_an_entity_id(self) -> None:
+        self.assertFalse(
+            statistical_answer_is_complete(
+                "El sensor relacionado es sensor.nspanel_temperature"
+            )
+        )
+        self.assertTrue(
+            statistical_answer_is_complete(
+                "La maxima fue 28,4 °C durante esta semana."
+            )
+        )
+        self.assertTrue(
+            statistical_answer_is_complete(
+                "No hay datos suficientes para calcular el maximo."
+            )
+        )
+
+    def test_statistical_answer_rejects_dates_outside_real_period(self) -> None:
+        period = (
+            "2026-07-27T00:00:00+02:00",
+            "2026-08-02T11:00:00+02:00",
+        )
+        self.assertTrue(
+            statistical_answer_period_is_consistent(
+                "Maximo del 31 de julio al 2 de agosto de 2026.", period
+            )
+        )
+        self.assertFalse(
+            statistical_answer_period_is_consistent(
+                "Periodo del 28 de julio al 4 de agosto de 2026.", period
+            )
+        )
+
+    def test_explicit_whatsapp_send_is_channel_specific(self) -> None:
+        self.assertTrue(
+            explicit_whatsapp_send_intent(
+                "Usa whatsapp_send_message para enviar al ultimo remitente el resultado"
+            )
+        )
+        self.assertTrue(
+            explicit_whatsapp_send_intent("manda por WhatsApp: el grifo ha regado 20 litros")
+        )
+        self.assertFalse(explicit_whatsapp_send_intent("riega los bonsais con 20 litros"))
+
     def test_historical_device_consumption_requires_attributed_measurement(self) -> None:
         self.assertTrue(
             historical_active_device_measurement_intent(
@@ -145,6 +252,17 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
                 "cuantos kWh consumio el aire acondicionado la semana pasada"
             )
         )
+        self.assertTrue(
+            historical_active_device_measurement_intent(
+                "casa busca el total de litros consumidos por el "
+                "switch.riego2_rele1 durante esta semana"
+            )
+        )
+        self.assertTrue(
+            historical_active_device_measurement_intent(
+                "cuantos litros esta semana ha regado el grifo de bonsais"
+            )
+        )
         self.assertFalse(
             historical_active_device_measurement_intent("riega los bonsais con 20 litros")
         )
@@ -154,14 +272,80 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
             )
         )
 
-    def test_critical_actions_offer_completion_alert_but_queries_do_not(self) -> None:
-        self.assertEqual(
-            should_offer_critical_completion_alert("cierra la valvula general de agua"),
-            "agua",
+    def test_attributed_measurement_requires_total_and_unit_in_freeform_answer(self) -> None:
+        result = {
+            "activity_entity_id": "switch.riego2_rele1",
+            "total": 165.24,
+            "unit": "L",
+            "start_time": "2026-07-25T00:00:00+02:00",
+            "end_time": "2026-08-01T00:00:00+02:00",
+            "active_intervals": 9,
+            "intervals_with_data": 9,
+            "coverage_complete": True,
+        }
+        self.assertFalse(
+            answer_contains_attributed_measurement(
+                "El entity_id relacionado es switch.riego2_rele1.", result
+            )
         )
-        self.assertEqual(
-            should_offer_critical_completion_alert("activa la sirena del terreno"),
-            "seguridad",
+        self.assertTrue(
+            answer_contains_attributed_measurement(
+                "Los bonsais consumieron 165,24 L durante el periodo solicitado; "
+                "la cobertura de los nueve intervalos fue completa.",
+                result,
+            )
+        )
+        self.assertTrue(
+            answer_contains_attributed_measurement(
+                "El riego de bonsais consumio unos 165 litros esta semana.", result
+            )
+        )
+        self.assertFalse(
+            answer_contains_attributed_measurement(
+                "Se analizaron 9 intervalos, pero no puedo indicar los litros.", result
+            )
+        )
+
+    def test_attributed_measurement_result_validation_executes_runtime_branch(self) -> None:
+        valid = parse_attributed_measurement_result(
+            '{"total":165.24,"unit":"L","active_intervals":9}'
+        )
+        self.assertIsNotNone(valid)
+        self.assertEqual(valid["total"], 165.24)
+        self.assertIsNone(parse_attributed_measurement_result('{"total":null}'))
+        self.assertIsNone(parse_attributed_measurement_result("ERROR de herramienta"))
+
+    def test_current_week_requires_local_monday_until_now(self) -> None:
+        now = dt.datetime(2026, 8, 1, 15, 45, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+        valid = {
+            "start_time": "2026-07-27T00:00:00+02:00",
+            "end_time": "2026-08-01T15:44:30+02:00",
+        }
+        rolling_week = {
+            "start_time": "2026-07-25T15:45:00+02:00",
+            "end_time": "2026-08-01T15:45:00+02:00",
+        }
+        self.assertIsNone(
+            attributed_measurement_period_error("consumo de esta semana", valid, now=now)
+        )
+        self.assertIn(
+            "2026-07-27T00:00:00+02:00",
+            attributed_measurement_period_error(
+                "consumo de esta semana", rolling_week, now=now
+            ),
+        )
+        self.assertIsNone(
+            attributed_measurement_period_error(
+                "consumo de los ultimos 7 dias", rolling_week, now=now
+            )
+        )
+
+    def test_critical_actions_offer_completion_alert_but_queries_do_not(self) -> None:
+        self.assertIsNone(
+            should_offer_critical_completion_alert("cierra la valvula general de agua")
+        )
+        self.assertIsNone(
+            should_offer_critical_completion_alert("activa la sirena del terreno")
         )
         self.assertIsNone(
             should_offer_critical_completion_alert("cuanta agua consumi ayer")
@@ -176,6 +360,19 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
         self.assertTrue(completion_notification_requested("avisame cuando acabes"))
         self.assertTrue(completion_notification_requested("confirmame cuando este hecho"))
         self.assertFalse(completion_notification_requested("avisame si llueve"))
+
+    def test_mobile_notification_must_be_explicit(self) -> None:
+        self.assertFalse(mobile_notification_explicitly_requested("avisame cuando acabes"))
+        self.assertFalse(mobile_notification_explicitly_requested("confirma el resultado"))
+        self.assertFalse(mobile_notification_explicitly_requested("localiza mi movil"))
+        self.assertTrue(
+            mobile_notification_explicitly_requested(
+                "avisame al movil cuando hayas terminado"
+            )
+        )
+        self.assertTrue(
+            mobile_notification_explicitly_requested("manda una notificacion al telefono")
+        )
 
     def test_ac_until_price_drop_phrase_is_deterministic(self) -> None:
         text = (
@@ -419,7 +616,7 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
         self.assertEqual(services, ["turn_on", "turn_off", "turn_on", "turn_off", "turn_on"])
         self.assertEqual(delays, [2.0, 2.0, 2.0, 2.0])
 
-    def test_scheduled_sequence_persists_completion_notification(self) -> None:
+    def test_generic_avisame_does_not_create_mobile_notification(self) -> None:
         answer = self.agent.try_schedule_known_switch_sequence(
             "dentro de 20s enciende la luz de la cocina y luego la apagaras y enciendes "
             "cada 2 segundos 2 veces; avisame cuando acabes"
@@ -427,6 +624,16 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
 
         self.assertIsNotNone(answer)
         plan = decode_plan(self.agent.memory.tasks[0]["instruction"])
+        self.assertNotIn("completion_notification", plan)
+
+    def test_explicit_mobile_request_persists_completion_notification(self) -> None:
+        answer = self.agent.try_schedule_known_switch_sequence(
+            "dentro de 20s enciende la luz de la cocina y luego la apagaras y enciendes "
+            "cada 2 segundos 2 veces; avisame al movil cuando acabes"
+        )
+
+        self.assertIsNotNone(answer)
+        plan = decode_plan(self.agent.memory.tasks[-1]["instruction"])
         self.assertEqual(
             plan["completion_notification"]["message"],
             "Tarea completada: Secuencia de luz de la cocina",
@@ -746,7 +953,7 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
             calls[0][1]["target_entity_id"], "sensor.temperatura_nuevo"
         )
 
-    async def test_old_critical_scheduled_task_gets_default_completion_alert(self) -> None:
+    async def test_old_critical_scheduled_task_does_not_get_default_mobile_alert(self) -> None:
         agent = CodexonAgent.__new__(CodexonAgent)
         agent.current_task_mobile_alert_sent = False
         calls: list[tuple[str, dict]] = []
@@ -759,6 +966,25 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
         result = await agent.send_scheduled_completion_alert(
             title="Cerrar agua",
             instruction="Cierra la valvula general de agua",
+            result="Valvula cerrada",
+        )
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result, "Valvula cerrada")
+
+    async def test_explicit_mobile_request_gets_completion_alert(self) -> None:
+        agent = CodexonAgent.__new__(CodexonAgent)
+        agent.current_task_mobile_alert_sent = False
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_call(real_name: str, args: dict) -> str:
+            calls.append((real_name, args))
+            return json.dumps({"called": True})
+
+        agent.call_builtin_tool = fake_call
+        result = await agent.send_scheduled_completion_alert(
+            title="Cerrar agua",
+            instruction="Cierra la valvula y avisame al movil cuando termines",
             result="Valvula cerrada",
         )
 
@@ -798,6 +1024,25 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(result, "Valvula cerrada")
+        self.assertEqual(calls, [])
+
+    async def test_whatsapp_send_task_never_adds_mobile_completion_alert(self) -> None:
+        agent = CodexonAgent.__new__(CodexonAgent)
+        agent.current_task_mobile_alert_sent = False
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_call(real_name: str, args: dict) -> str:
+            calls.append((real_name, args))
+            return json.dumps({"called": True})
+
+        agent.call_builtin_tool = fake_call
+        result = await agent.send_scheduled_completion_alert(
+            title="Enviar resultado",
+            instruction="Usa whatsapp_send_message para enviar: el grifo ha regado 20 litros",
+            result="Mensaje enviado por WhatsApp",
+        )
+
+        self.assertEqual(result, "Mensaje enviado por WhatsApp")
         self.assertEqual(calls, [])
 
     async def test_schedule_automation_persists_generic_plan(self) -> None:

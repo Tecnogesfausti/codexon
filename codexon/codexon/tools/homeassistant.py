@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -1847,9 +1848,20 @@ async def resolve_history_entities(context: Any, args: dict[str, Any]) -> list[s
     domain = str(args.get("domain", "sensor") or "sensor").strip().lower()
     device_class = str(args.get("device_class", "") or "").strip().lower()
     limit = max(1, min(int(args.get("limit", 12) or 12), 50))
+    candidates: list[str] = []
+    profile = getattr(context, "site_profile", None)
+    if query and profile is not None and hasattr(profile, "search_bindings"):
+        with contextlib.suppress(Exception):
+            for role, _binding in profile.search_bindings(query):
+                for entity_id in profile.entities(role):
+                    if domain and not str(entity_id).startswith(f"{domain}."):
+                        continue
+                    if entity_id not in candidates:
+                        candidates.append(entity_id)
+                    if len(candidates) >= limit:
+                        return candidates
     states_raw = await ha_get_states(context, {"query": query, "domain": domain, "limit": 500})
     states = json.loads(states_raw)
-    candidates: list[str] = []
     for state in states:
         if device_class and str(state.get("device_class") or "").lower() != device_class:
             continue
@@ -1886,11 +1898,13 @@ def flatten_history_points(history: Any) -> list[dict[str, Any]]:
 
 
 HISTORY_AGGREGATIONS = {"min", "max", "mean", "first", "last", "delta"}
-HISTORY_GROUPS = {"hour", "day", "week"}
+HISTORY_GROUPS = {"period", "hour", "day", "week"}
 WEEKDAY_NAMES_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
 
 
 def numeric_history_group(local_time: dt.datetime, group_by: str) -> tuple[str, dt.datetime]:
+    if group_by == "period":
+        return "period", local_time
     if group_by == "hour":
         start = local_time.replace(minute=0, second=0, microsecond=0)
         return start.isoformat(timespec="seconds"), start

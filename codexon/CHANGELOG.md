@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.4
+
+- Una invocacion fallida o sin total de `ha_measure_numeric_during_state` ya no satisface una consulta de consumo historico.
+- Si el modelo omite el total obtenido y vuelve a responder solo con la entidad, Codexon le pide reinterpretar el resultado real y redactar de nuevo la respuesta con total, unidad, periodo y cobertura; no usa una plantilla de respuesta determinista.
+- Reconocidas tambien las formas flexionadas como `litros consumidos`, `gastados`, `usados` o `registrados` en consultas atribuidas a un dispositivo.
+- Las expresiones `ha regado`, `regado` y `regaron` tambien se interpretan como volumen historico cuando la pregunta incluye una unidad y un periodo.
+- Corregida la validacion en ejecucion de totales numericos y cubierta con una prueba directa de resultados validos, nulos y errores de herramienta.
+- La comprobacion de la respuesta acepta decimales con coma, redondeos razonables y unidades expresadas con simbolo o nombre, pero sigue rechazando respuestas que solo mencionen intervalos o entidades.
+- `Esta semana` se valida como semana natural local, desde el lunes a las 00:00 hasta ahora; se rechazan intervalos moviles de siete dias o finales futuros para esa expresion.
+- Las tareas explicitas de envio por WhatsApp se enrutan antes que los ejecutores domoticos: el texto citado no puede interpretarse como una orden de riego y el envio no genera una notificacion movil adicional.
+- Las notificaciones telefonicas pasan a ser exclusivamente opt-in: criticidad, finalizacion y expresiones genericas como `avisame` ya no generan alertas moviles; el usuario debe mencionar explicitamente movil o telefono.
+- Las preguntas ambientales historicas o estadisticas ya no se responden con estados actuales; maximos, minimos y medias sin intervalo deben pedir al usuario el periodo a analizar.
+- Añadida una barrera general previa al modelo para que estadísticas numéricas sin periodo pidan aclaración y no conviertan estados actuales o recuerdos en máximos históricos.
+- Incorporado un planificador estadistico semantico estructurado que separa magnitud, agregacion, zona, periodo y atribucion de actividad; la seleccion posterior usa roles, capacidades, unidades, aliases y relaciones del perfil en lugar de ampliar listas de frases.
+- Las respuestas estadisticas deben ejecutar una herramienta historica y contener un valor real o declarar falta de datos; los atajos deterministas de consumo e historial quedan fuera cuando existe un plan semantico.
+- El agregador admite ahora todo el intervalo (`group_by=period`), reutiliza la consulta semantica validada entre herramientas y resuelve primero colecciones del perfil antes del catalogo textual.
+- La redaccion se rechaza y reintenta si menciona fechas fuera del intervalo historico realmente consultado.
+- Ampliada la guia de razonamiento estadistico: distingue actividad y medicion, consulta relaciones semanticas del perfil y admite contadores compartidos entre varias ramas o dispositivos.
+
 ## 0.3.3
 
 - Las preguntas de consumo historico atribuido a un dispositivo deben ejecutar la medicion cruzada entre su actividad y el contador numerico; resolver solamente el `entity_id` ya no se acepta como respuesta.

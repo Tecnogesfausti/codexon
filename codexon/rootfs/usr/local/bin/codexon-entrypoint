@@ -89,7 +89,7 @@ if [[ ! -f /data/codexon/app/codexon.py ]]; then
   rsync -a /opt/codexon/app/ /data/codexon/app/
 fi
 
-CODEXON_RUNTIME_MIGRATION=runtime-0.3.3
+CODEXON_RUNTIME_MIGRATION=runtime-0.3.4
 CODEXON_MIGRATION_DIR=/data/codexon/migrations
 CODEXON_MIGRATION_MARKER="${CODEXON_MIGRATION_DIR}/${CODEXON_RUNTIME_MIGRATION}"
 if [[ ! -f "$CODEXON_MIGRATION_MARKER" ]]; then

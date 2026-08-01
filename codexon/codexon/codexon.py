@@ -26,6 +26,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import json
+import math
 import os
 import re
 import signal
@@ -574,6 +575,16 @@ def readonly_entity_inventory_intent(value: str) -> bool:
     return explicit_question or requested_all or capability_question
 
 
+def explicit_whatsapp_send_intent(value: str) -> bool:
+    folded = normalize_entity_alias(value)
+    if "whatsapp_send_message" in folded:
+        return True
+    return bool(
+        re.search(r"\b(?:envia|enviar|manda|mandar|escribe|escribir)\b", folded)
+        and re.search(r"\b(?:whatsapp|whatsup|wasap)\b", folded)
+    )
+
+
 def historical_active_device_measurement_intent(value: str) -> bool:
     """Identify historical consumption that must be attributed to device activity."""
     folded = normalize_entity_alias(value)
@@ -596,8 +607,9 @@ def historical_active_device_measurement_intent(value: str) -> bool:
     historical_consumption = bool(
         re.search(
             r"\b(?:ha|han|habia|habian|haya|hayan)?\s*"
-            r"(?:consumido|gastado|usado|registrado)\b|"
-            r"\b(?:consumio|consumieron|gasto|gastaron|uso|usaron|registro|registraron)\b",
+            r"(?:consumid[oa]s?|gastad[oa]s?|usad[oa]s?|registrad[oa]s?|regad[oa]s?)\b|"
+            r"\b(?:consumio|consumieron|gasto|gastaron|uso|usaron|registro|registraron|"
+            r"rego|regaron)\b",
             folded,
         )
     )
@@ -610,6 +622,87 @@ def historical_active_device_measurement_intent(value: str) -> bool:
         )
     )
     return historical_period and historical_consumption and active_device
+
+
+def answer_contains_attributed_measurement(answer: str, result: dict[str, Any]) -> bool:
+    total = result.get("total")
+    if not isinstance(total, (int, float)) or isinstance(total, bool):
+        return False
+    normalized_answer = normalize_entity_alias(answer).replace(",", ".")
+    unit = normalize_entity_alias(str(result.get("unit") or ""))
+    numeric_values: list[float] = []
+    for token in re.findall(r"(?<![\w.])-?\d+(?:\.\d+)?", normalized_answer):
+        with contextlib.suppress(ValueError):
+            numeric_values.append(float(token))
+    total_present = any(
+        math.isclose(value, float(total), rel_tol=0.005, abs_tol=0.05)
+        for value in numeric_values
+    )
+    if not total_present:
+        return False
+    if not unit:
+        return True
+    unit_patterns = {
+        "l": r"\b(?:l|litro|litros)\b",
+        "m3": r"\b(?:m3|metro cubico|metros cubicos)\b",
+        "kwh": r"\b(?:kwh|kilovatio hora|kilovatios hora)\b",
+        "wh": r"\b(?:wh|vatio hora|vatios hora)\b",
+    }
+    pattern = unit_patterns.get(unit)
+    return bool(re.search(pattern, normalized_answer)) if pattern else unit in normalized_answer
+
+
+def parse_attributed_measurement_result(content_text: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(content_text)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    total = parsed.get("total")
+    if (
+        not isinstance(total, (int, float))
+        or isinstance(total, bool)
+        or not math.isfinite(float(total))
+    ):
+        return None
+    return parsed
+
+
+def attributed_measurement_period_error(
+    user_text: str,
+    result: dict[str, Any],
+    *,
+    now: dt.datetime | None = None,
+) -> str | None:
+    folded = normalize_entity_alias(user_text)
+    if not re.search(r"\b(?:esta semana|semana actual)\b", folded):
+        return None
+    reference = (now or local_now()).astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    expected_start = (reference - dt.timedelta(days=reference.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    try:
+        actual_start = dt.datetime.fromisoformat(str(result.get("start_time") or ""))
+        actual_end = dt.datetime.fromisoformat(str(result.get("end_time") or ""))
+    except ValueError:
+        return "El periodo devuelto no contiene fechas ISO validas."
+    if actual_start.tzinfo is None:
+        actual_start = actual_start.replace(tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+    if actual_end.tzinfo is None:
+        actual_end = actual_end.replace(tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+    actual_start = actual_start.astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    actual_end = actual_end.astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    start_ok = abs((actual_start - expected_start).total_seconds()) <= 60
+    end_ok = abs((actual_end - reference).total_seconds()) <= 15 * 60
+    if start_ok and end_ok:
+        return None
+    return (
+        "'Esta semana' es la semana natural local: usa start_time="
+        f"{expected_start.isoformat(timespec='seconds')} y end_time="
+        f"{reference.isoformat(timespec='seconds')}; no uses los ultimos siete dias "
+        "ni extiendas el final al futuro."
+    )
 
 
 def requested_ac_pvpc_budget_plan(user_text: str) -> dict[str, Any] | None:
@@ -985,6 +1078,27 @@ def completion_notification_requested(user_text: str) -> bool:
     return any(re.search(pattern, folded) for pattern in patterns)
 
 
+def mobile_notification_explicitly_requested(user_text: str) -> bool:
+    folded = normalize_cancellation_key(user_text)
+    if "ha_send_mobile_alert" in folded:
+        return True
+    channel = bool(
+        re.search(
+            r"\b(?:movil|telefono|notificacion movil|aviso movil|alerta movil|"
+            r"mobile_app|push al movil|push al telefono)\b",
+            folded,
+        )
+    )
+    request = bool(
+        re.search(
+            r"\b(?:avisa|avisame|notifica|notificame|manda|mandame|envia|enviame|"
+            r"alerta|aviso|notificacion|confirma|confirmame|push)\b",
+            folded,
+        )
+    )
+    return channel and request
+
+
 def notification_preference_declined(user_text: str) -> bool:
     folded = normalize_cancellation_key(user_text)
     return any(
@@ -1051,15 +1165,8 @@ def critical_action_requested(user_text: str) -> bool:
 
 
 def should_offer_critical_completion_alert(user_text: str) -> str | None:
-    category = critical_operation_category(user_text)
-    if not category or not critical_action_requested(user_text):
-        return None
-    folded = normalize_cancellation_key(user_text)
-    has_alert_preference = completion_notification_requested(user_text) or notification_preference_declined(user_text)
-    has_alert_preference = has_alert_preference or any(
-        term in folded for term in ("alerta", "avisame", "notificame", "al movil")
-    )
-    return None if has_alert_preference else category
+    # Mobile alerts are opt-in. Criticality must never create or propose a phone alert implicitly.
+    return None
 
 
 def attach_completion_notification(plan: dict[str, Any], user_text: str) -> dict[str, Any]:
@@ -1067,7 +1174,7 @@ def attach_completion_notification(plan: dict[str, Any], user_text: str) -> dict
         enriched = dict(plan)
         enriched["completion_notification"] = {"enabled": False}
         return enriched
-    if not completion_notification_requested(user_text):
+    if not mobile_notification_explicitly_requested(user_text):
         return plan
     enriched = dict(plan)
     enriched["completion_notification"] = {
@@ -1152,6 +1259,167 @@ def extract_json_object(raw: str) -> dict[str, Any]:
         if start >= 0 and end > start:
             text = text[start : end + 1]
     return json.loads(text)
+
+
+@dataclasses.dataclass(frozen=True)
+class SemanticStatisticalPlan:
+    metric: str
+    aggregation: str
+    scope: str
+    period_status: str
+    period_text: str
+    period_kind: str = "missing"
+    start_time: str = ""
+    end_time: str = ""
+    rolling_days: int = 0
+    clarification_question: str = ""
+    needs_activity_attribution: bool = False
+    activity_scope: str = ""
+
+
+def parse_semantic_statistical_plan(raw: str) -> SemanticStatisticalPlan | None:
+    try:
+        payload = extract_json_object(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if str(payload.get("kind") or "").strip().lower() != "statistical":
+        return None
+    metric = str(payload.get("metric") or "").strip()
+    aggregation = str(payload.get("aggregation") or "").strip().lower()
+    scope = str(payload.get("scope") or "").strip()
+    period_status = str(payload.get("period_status") or "missing").strip().lower()
+    period_text = str(payload.get("period_text") or "").strip()
+    if not metric or not aggregation or aggregation not in {
+        "maximum", "minimum", "average", "sum", "range", "count", "comparison"
+    }:
+        return None
+    if period_status not in {"explicit", "missing"}:
+        period_status = "missing"
+    period_kind = str(payload.get("period_kind") or period_status).strip().lower()
+    if period_kind not in {
+        "missing", "today", "yesterday", "current_week", "previous_week",
+        "current_month", "previous_month", "rolling_days", "explicit_dates",
+        "all_history",
+    }:
+        period_kind = "missing" if period_status == "missing" else "explicit_dates"
+    try:
+        rolling_days = max(0, int(payload.get("rolling_days") or 0))
+    except (TypeError, ValueError):
+        rolling_days = 0
+    return SemanticStatisticalPlan(
+        metric=metric,
+        aggregation=aggregation,
+        scope=scope,
+        period_status=period_status,
+        period_text=period_text,
+        period_kind=period_kind,
+        start_time=str(payload.get("start_time") or "").strip(),
+        end_time=str(payload.get("end_time") or "").strip(),
+        rolling_days=rolling_days,
+        clarification_question=str(payload.get("clarification_question") or "").strip(),
+        needs_activity_attribution=bool(payload.get("needs_activity_attribution")),
+        activity_scope=str(payload.get("activity_scope") or "").strip(),
+    )
+
+
+def canonical_statistical_period(
+    plan: SemanticStatisticalPlan,
+    *,
+    now: dt.datetime | None = None,
+) -> tuple[str, str] | None:
+    reference = (now or local_now()).astimezone(ZoneInfo(DEFAULT_TIMEZONE))
+    day_start = reference.replace(hour=0, minute=0, second=0, microsecond=0)
+    if plan.period_kind == "today":
+        start, end = day_start, reference
+    elif plan.period_kind == "yesterday":
+        start, end = day_start - dt.timedelta(days=1), day_start
+    elif plan.period_kind == "current_week":
+        start = (day_start - dt.timedelta(days=reference.weekday()))
+        end = reference
+    elif plan.period_kind == "previous_week":
+        end = day_start - dt.timedelta(days=reference.weekday())
+        start = end - dt.timedelta(days=7)
+    elif plan.period_kind == "current_month":
+        start, end = day_start.replace(day=1), reference
+    elif plan.period_kind == "previous_month":
+        end = day_start.replace(day=1)
+        start = (end - dt.timedelta(days=1)).replace(day=1)
+    elif plan.period_kind == "rolling_days" and plan.rolling_days > 0:
+        start, end = reference - dt.timedelta(days=plan.rolling_days), reference
+    elif plan.period_kind == "explicit_dates" and plan.start_time:
+        try:
+            start = dt.datetime.fromisoformat(plan.start_time)
+            end = dt.datetime.fromisoformat(plan.end_time) if plan.end_time else reference
+        except ValueError:
+            return None
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=ZoneInfo(DEFAULT_TIMEZONE))
+    else:
+        return None
+    return (
+        start.astimezone(ZoneInfo(DEFAULT_TIMEZONE)).isoformat(timespec="seconds"),
+        end.astimezone(ZoneInfo(DEFAULT_TIMEZONE)).isoformat(timespec="seconds"),
+    )
+
+
+def statistical_answer_is_complete(answer: str) -> bool:
+    folded = normalize_entity_alias(answer)
+    without_entity_ids = re.sub(r"\b[a-z_]+\.[a-z0-9_.]+\b", " ", folded)
+    if re.search(r"(?<!\w)-?\d+(?:[,.]\d+)?", without_entity_ids):
+        return True
+    return any(
+        phrase in folded
+        for phrase in (
+            "no hay datos",
+            "sin datos",
+            "no se encontraron datos",
+            "no pude calcular",
+            "no he podido calcular",
+            "cobertura insuficiente",
+        )
+    )
+
+
+def statistical_answer_period_is_consistent(
+    answer: str,
+    period: tuple[str, str] | None,
+) -> bool:
+    if period is None:
+        return True
+    try:
+        start = dt.datetime.fromisoformat(period[0]).date()
+        end = dt.datetime.fromisoformat(period[1]).date()
+    except ValueError:
+        return False
+    folded = normalize_entity_alias(answer)
+    mentioned: list[dt.date] = []
+    month_pattern = "|".join(SPANISH_MONTH_NAMES)
+    for match in re.finditer(
+        rf"\b(?P<day>\d{{1,2}})\s+de\s+(?P<month>{month_pattern})"
+        rf"(?:\s+de\s+(?P<year>\d{{4}}))?\b",
+        folded,
+    ):
+        month = SPANISH_MONTH_NAMES.index(match.group("month")) + 1
+        year = int(match.group("year") or end.year)
+        if not match.group("year") and month > end.month + 6:
+            year -= 1
+        with contextlib.suppress(ValueError):
+            mentioned.append(dt.date(year, month, int(match.group("day"))))
+    for match in re.finditer(
+        r"\b(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\b",
+        folded,
+    ):
+        with contextlib.suppress(ValueError):
+            mentioned.append(
+                dt.date(
+                    int(match.group("year")),
+                    int(match.group("month")),
+                    int(match.group("day")),
+                )
+            )
+    return all(start <= value <= end for value in mentioned)
 
 
 def estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
@@ -3589,10 +3857,14 @@ Reglas:
 - Cuando el usuario use nombres naturales de sensores/dispositivos, no inventes entity_id. Usa ha_search_entities o ha_get_state con query/domain; fíjate en area_name/device_name para distinguir ubicaciones como Casa, Salón, Comedor, Oficina o Terreno. Conserva las ubicaciones que diga el usuario en query: para "interruptores en comedor o salon" usa query="comedor salon" y domain="switch,light", no query="interruptor". Si una herramienta indica ambigüedad, muestra candidatos y pide precisión antes de actuar.
 - Para contar, listar o enumerar dispositivos por nombres naturales consulta primero ha_search_site_entities. Basa el número, nombres, roles y límites únicamente en su resultado e incluye siempre cada entity_id completo con dominio. Si semantic_name_known=false, di “sin zona o función asignada” y no inventes una descripción. Cantidad existente no significa máximo simultáneo: si simultaneous_limit_known=false, di únicamente que el límite simultáneo no está configurado; no afirmes que se puedan activar individualmente o en grupos ni propongas cifras, independencia, compatibilidad o recomendaciones. Una consulta de listado es de solo lectura: no crees tareas, escuchas ni automatizaciones.
 - Para localizar la moto, mi moto, Sinotrak, el movil, mi movil, telefono o Samsung usa siempre traccar_get_location. Moto corresponde exclusivamente a Sinotrak y movil corresponde exclusivamente a Samsung. No uses otros device_tracker, Bluetooth, WiFi ni recuerdos antiguos. Indica siempre antiguedad y si la posicion no es actual.
-- Para preguntas históricas usa ha_get_history o ha_get_logbook si están disponibles. Para valores alrededor de una hora local durante varios días usa ha_get_history_around_time.
-- Para comparar valores numéricos entre horas, días o semanas usa ha_aggregate_numeric_history. Ejemplo: "qué día de la semana pasada consumí más agua" requiere el sensor diario, el intervalo de la semana natural anterior, group_by=day y aggregation=max si el contador se reinicia diariamente.
-- Resolver el entity_id de un dispositivo nunca completa una pregunta que pide cuánto consumió durante un periodo. En esas preguntas resuelve también el contador numérico asociado y usa ha_measure_numeric_during_state para cruzar ambos históricos. Para una válvula o zona de riego usa como actividad su switch/controlador y como medición el role irrigation.flow_meter del perfil local. Informa del total y de la cobertura; no respondas únicamente con el entity_id.
-- Si ha_aggregate_numeric_history no devuelve muestras porque el recorder ya eliminó los estados antiguos, usa ha_get_long_term_statistics con el mismo inicio, fin y sensor acumulado. No conviertas un número de día, como "día 10", en una hora.
+- Ante una pregunta estadística, razona primero qué se quiere calcular: estado en un instante, transiciones/eventos, agregado de una serie numérica o consumo atribuible a los intervalos activos de un dispositivo. El nombre del dispositivo y la magnitud medida pueden pertenecer a entidades distintas.
+- Resuelve las fuentes por significado: consulta primero roles, alias y zonas del perfil local, y después el catálogo real de Home Assistant si falta información. No supongas que cada válvula, máquina o zona tenga un sensor de consumo dedicado: un contador común puede medir varias ramas y la actividad de cada controlador permite atribuirle su parte.
+- Para preguntas históricas usa ha_get_history o ha_get_logbook si están disponibles. Para valores alrededor de una hora local durante varios días usa ha_get_history_around_time. Para comparar o agrupar una serie numérica usa ha_aggregate_numeric_history. Si el recorder ya eliminó estados antiguos, usa ha_get_long_term_statistics con el mismo periodo y sensor.
+- Cuando se pida cuánto consumió una válvula, zona, máquina o interruptor durante un periodo, resuelve una entidad de actividad y otra de medición y usa ha_measure_numeric_during_state. En riego, el controlador o switch delimita los intervalos y el role irrigation.flow_meter aporta el contador compartido. Esto es una relación semántica entre funciones, no una asociación fija entre entity_id.
+- Interpreta periodos en la zona horaria local: `esta semana` o `semana actual` empieza el lunes a las 00:00 y termina ahora; `semana pasada` es la semana natural anterior; `ultimos 7 dias` es un intervalo movil. Nunca amplíes `ahora` al final futuro del día.
+- Una respuesta estadística debe contestar la magnitud solicitada a partir del resultado de las herramientas: incluye total o valor, unidad, periodo y cualquier limitación de cobertura relevante. Los entity_id explican las fuentes pero nunca sustituyen el resultado. No afirmes que falta un sensor dedicado hasta haber consultado los roles y relaciones del perfil local.
+- Para máximos, mínimos, medias, rangos u otras estadísticas necesitas un periodo explícito. Si el usuario no indica hoy, ayer, semana, mes, fechas u otro intervalo, pregunta qué periodo quiere analizar; no sustituyas la estadística por el estado actual ni elijas arbitrariamente todo el histórico disponible.
+- No conviertas un número de día, como "día 10", en una hora.
 - Desambiguacion estricta de "luz": "enciende/apaga/prende/pon la luz" es accion fisica sobre switch/light; "cuanta luz", "nivel de luz", "luminosidad", "lux" o "sensacion luminica" son sensores de iluminancia; "se ha ido la luz", "corte de luz", "sin luz", "hay corriente" o "suministro electrico" es ausencia/presencia de suministro; "precio de la luz", "luz barata/cara", "kWh" o "mejores horas para consumir" es PVPC/electricidad.
 - Para acciones fisicas sobre luces busca en los dominios switch y light, ya que una instalacion puede usar reles como luminarias.
 - Para climatizacion, energia, seguridad, riego y sensores ambientales usa primero los roles del perfil local. Si falta un role, descubre candidatos en Home Assistant y pide confirmacion antes de asociarlos.
@@ -3615,9 +3887,9 @@ Reglas:
 - Para leer, contar, crear o borrar ficheros usa fs_list_dir, fs_read_file, fs_count_text, fs_write_file y fs_delete_path.
 - Para sensores en ficheros usa sensor_read_file; para exportar datos usa data_write_file; para consultar páginas web públicas usa web_fetch_url.
 - Si el usuario pide llamar, avisar o notificar, usa el destino configurado en el perfil o descubre los servicios notify disponibles. No afirmes que el usuario lo ha oido o leido; solo que la notificacion fue enviada.
-- Agua, suministro electrico y seguridad son ambitos criticos. En la conversacion, antes de ejecutar inmediatamente o guardar una accion critica, si el usuario no ha indicado preferencia, pregunta si quiere confirmacion del resultado y alerta movil al terminar. Esta pregunta ocurre antes de crear la tarea. Si la respuesta es afirmativa, retoma la orden pendiente; no obligues al usuario a repetirla.
-- Una tarea que ya esta en agenda nunca puede detenerse para preguntar ni esperar respuesta humana. Cuando llegue su hora, ejecuta la preferencia guardada. Si es una tarea critica antigua sin preferencia guardada, ejecutala y envia alerta movil al terminar por defecto.
-- Interpreta "avisame cuando acabes", "notificame al terminar" y "confirmame cuando este hecho" como una orden de finalizacion. En acciones inmediatas, ejecuta primero y llama ha_send_mobile_alert al final. En schedule_automation usa completion_notification; en schedule_task conserva explicitamente la orden de avisar al terminar. Nunca envies el aviso de exito antes de completar y verificar la accion.
+- Las respuestas y resultados vuelven por el mismo canal de origen. En WhatsApp responde por WhatsApp; en el chat responde en el chat. No llames ha_send_mobile_alert por defecto, por criticidad, por completar una tarea ni por expresiones genericas como "avisame" o "confirmame".
+- Solo usa ha_send_mobile_alert cuando el usuario pida explicitamente una notificacion, aviso o alerta al movil/telefono. La palabra movil usada para localizar un dispositivo no es una peticion de notificacion. Una tarea antigua sin preferencia explicita tampoco recibe aviso telefonico.
+- Una tarea que ya esta en agenda nunca puede detenerse para preguntar ni esperar respuesta humana. Ejecuta la accion y devuelve el resultado por su canal normal; nunca preguntes si quiere una alerta movil.
 - Toda frase donde el usuario pida que Codexon hable, diga, anuncie, avise por voz o reproduzca un mensaje hablado debe pasar por TTS en un media_player de Home Assistant. Interpreta peticiones naturales como "di hola por algun altavoz" como una peticion de voz. Primero usa ha_get_tts_media_players(query="", limit=100), que ya filtra destinos no audibles como mute o volumen 0. Si el usuario indica un destino claro, habla directamente sin pedir confirmación extra. Si no hay destino claro y hay varias opciones, ofrece una lista breve incluyendo nombres amistosos y entity_id. Para hablar usa ha_call_service con domain="tts", service="google_translate_say", service_data={{"cache": false, "language": "es", "entity_id": "media_player...", "message": "..."}}, sin confirmación extra. Tras una llamada TTS correcta, di que el mensaje fue enviado; no afirmes que se oyo o se reprodujo porque Home Assistant solo confirma la llamada al servicio.
 - Configuracion especifica de esta instalacion:
 {site_context}
@@ -3655,9 +3927,12 @@ Tareas pendientes:
         max_budget_usd: float | None = None,
         preferred_model: str | None = None,
         requires_memory: bool = False,
+        ignore_request_preference: bool = False,
     ) -> Any:
         route = (self.router.config.get("routes") or {}).get(task) or {}
-        effective_preferred_model = preferred_model or self.request_preferred_model
+        effective_preferred_model = preferred_model or (
+            None if ignore_request_preference else self.request_preferred_model
+        )
         effective_priority = str(route.get("priority") or priority)
         selection = self.router.select(
             ModelRequest(
@@ -3709,6 +3984,43 @@ Tareas pendientes:
         if last_exc is not None:
             raise last_exc
         raise RuntimeError("ModelRouter no devolvió modelos candidatos")
+
+    async def semantic_statistical_plan(
+        self, user_text: str
+    ) -> SemanticStatisticalPlan | None:
+        now = local_now().isoformat(timespec="seconds")
+        response = await self._chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Clasifica semanticamente la peticion, sin depender de palabras exactas. "
+                        "Una consulta estadistica pide calcular maximo, minimo, media, suma, rango, "
+                        "recuento o comparacion sobre estados/eventos de Home Assistant. Una lectura "
+                        "actual, una accion, una lista de entidades o una pregunta general es other. "
+                        "Separa la magnitud medida del dispositivo cuya actividad puede atribuirle el "
+                        "consumo. No inventes entity_id. Devuelve exclusivamente JSON con: "
+                        "kind (statistical|other), metric, aggregation "
+                        "(maximum|minimum|average|sum|range|count|comparison), scope, "
+                        "period_status (explicit|missing), period_text, period_kind "
+                        "(missing|today|yesterday|current_week|previous_week|current_month|"
+                        "previous_month|rolling_days|explicit_dates|all_history), start_time, "
+                        "end_time, rolling_days, clarification_question, "
+                        "needs_activity_attribution (boolean), activity_scope. "
+                        f"Fecha local actual: {now}. Considera periodo explicit solo si el usuario "
+                        "indica hoy, ayer, semana, mes, fechas, desde/hasta, ultimos N o todo el historico. "
+                        "Si falta, escribe clarification_question en español natural y no inventes periodo."
+                    ),
+                },
+                {"role": "user", "content": user_text},
+            ],
+            tools=False,
+            task="classification",
+            ignore_request_preference=True,
+        )
+        return parse_semantic_statistical_plan(
+            response.choices[0].message.content or ""
+        )
 
     def record_usage(
         self,
@@ -3778,7 +4090,7 @@ Tareas pendientes:
                 effective_text = self.request_effective_user_text or user_text
                 if (
                     task == "homeassistant"
-                    and completion_notification_requested(effective_text)
+                    and mobile_notification_explicitly_requested(effective_text)
                     and not scheduling_intent_hint(effective_text)
                     and not self.request_mobile_alert_sent
                 ):
@@ -3802,6 +4114,7 @@ Tareas pendientes:
 
     async def _ask_unlocked(self, user_text: str, *, task: str) -> str:
         conversation_user_text = user_text
+        statistical_plan: SemanticStatisticalPlan | None = None
         pending_lexical = getattr(self, "pending_lexical_correction", None)
         if task == "homeassistant" and pending_lexical:
             preference = notification_preference_reply(user_text)
@@ -3861,6 +4174,31 @@ Tareas pendientes:
                 self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
                 await self.learn_from_turn(conversation_user_text, teaching_answer)
                 return teaching_answer
+
+            try:
+                statistical_plan = await self.semantic_statistical_plan(user_text)
+            except Exception as exc:  # La clasificacion semantica no debe romper otras peticiones.
+                self.memory.add_event(
+                    level="warn",
+                    message=(
+                        "No se pudo crear el plan estadistico semantico: "
+                        f"{exception_summary(exc)}"
+                    ),
+                )
+            if statistical_plan and statistical_plan.period_status == "missing":
+                answer = statistical_plan.clarification_question or (
+                    "¿De qué periodo quieres que calcule esa estadística: hoy, ayer, "
+                    "esta semana, este mes o unas fechas concretas?"
+                )
+                self.messages.extend(
+                    [
+                        {"role": "user", "content": conversation_user_text},
+                        {"role": "assistant", "content": answer},
+                    ]
+                )
+                self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
+                await self.learn_from_turn(conversation_user_text, answer)
+                return answer
 
             whatsapp_water_answer = self.try_schedule_whatsapp_water_liters(user_text)
             if whatsapp_water_answer:
@@ -4242,7 +4580,7 @@ Tareas pendientes:
                 return answer
 
             environment_sensor = requested_environment_sensor(user_text, self.site_profile)
-            if environment_sensor:
+            if environment_sensor and statistical_plan is None:
                 entities = list(environment_sensor["entities"])
                 label = str(environment_sensor["label"])
                 unit = str(environment_sensor["unit"])
@@ -4406,42 +4744,78 @@ Tareas pendientes:
                 self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
                 await self.learn_from_turn(conversation_user_text, answer)
                 return answer
-            connected_load_answer = await self.try_answer_connected_load_consumption(user_text)
-            if connected_load_answer:
-                self.messages.extend(
-                    [
-                        {"role": "user", "content": conversation_user_text},
-                        {"role": "assistant", "content": connected_load_answer},
-                    ]
-                )
-                self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
-                await self.learn_from_turn(conversation_user_text, connected_load_answer)
-                return connected_load_answer
-            historical_comparison_answer = await self.try_answer_numeric_period_comparison(user_text)
-            if historical_comparison_answer:
-                self.messages.extend(
-                    [
-                        {"role": "user", "content": conversation_user_text},
-                        {"role": "assistant", "content": historical_comparison_answer},
-                    ]
-                )
-                self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
-                await self.learn_from_turn(conversation_user_text, historical_comparison_answer)
-                return historical_comparison_answer
-            historical_day_answer = await self.try_answer_numeric_weekday_value(user_text)
-            if historical_day_answer:
-                self.messages.extend(
-                    [
-                        {"role": "user", "content": conversation_user_text},
-                        {"role": "assistant", "content": historical_day_answer},
-                    ]
-                )
-                self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
-                await self.learn_from_turn(conversation_user_text, historical_day_answer)
-                return historical_day_answer
+            if statistical_plan is None:
+                connected_load_answer = await self.try_answer_connected_load_consumption(user_text)
+                if connected_load_answer:
+                    self.messages.extend(
+                        [
+                            {"role": "user", "content": conversation_user_text},
+                            {"role": "assistant", "content": connected_load_answer},
+                        ]
+                    )
+                    self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
+                    await self.learn_from_turn(conversation_user_text, connected_load_answer)
+                    return connected_load_answer
+                historical_comparison_answer = await self.try_answer_numeric_period_comparison(user_text)
+                if historical_comparison_answer:
+                    self.messages.extend(
+                        [
+                            {"role": "user", "content": conversation_user_text},
+                            {"role": "assistant", "content": historical_comparison_answer},
+                        ]
+                    )
+                    self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
+                    await self.learn_from_turn(conversation_user_text, historical_comparison_answer)
+                    return historical_comparison_answer
+                historical_day_answer = await self.try_answer_numeric_weekday_value(user_text)
+                if historical_day_answer:
+                    self.messages.extend(
+                        [
+                            {"role": "user", "content": conversation_user_text},
+                            {"role": "assistant", "content": historical_day_answer},
+                        ]
+                    )
+                    self.messages = self.messages[-MAX_HISTORY_MESSAGES:]
+                    await self.learn_from_turn(conversation_user_text, historical_day_answer)
+                    return historical_day_answer
 
+        statistical_period = (
+            canonical_statistical_period(statistical_plan)
+            if statistical_plan is not None
+            else None
+        )
+        statistical_plan_context = (
+            {
+                **dataclasses.asdict(statistical_plan),
+                "canonical_start_time": statistical_period[0] if statistical_period else "",
+                "canonical_end_time": statistical_period[1] if statistical_period else "",
+            }
+            if statistical_plan is not None
+            else None
+        )
         working_messages = [
             {"role": "system", "content": self._system_prompt(user_text)},
+            *(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Plan estadistico semantico ya clasificado:\n"
+                            f"{compact_json(statistical_plan_context, 4000)}\n"
+                            "Resuelve las entidades por funciones, roles, device_class, unidad, zona, "
+                            "aliases y relaciones aprendidas. Usa ha_search_site_entities para el perfil "
+                            "semantico y ha_search_entities para completar el catalogo real. El dispositivo "
+                            "mencionado no tiene por que ser el sensor que mide la magnitud. Ejecuta la "
+                            "herramienta historica adecuada y responde con valor, unidad, periodo, fuentes "
+                            "y cobertura. Para maximo/minimo/media de todo el intervalo usa "
+                            "ha_aggregate_numeric_history con group_by=period y aplica la consulta a todos "
+                            "los sensores semanticos coincidentes, no solo al primero."
+                        ),
+                    }
+                ]
+                if statistical_plan is not None
+                else []
+            ),
             *self.messages[-MAX_HISTORY_MESSAGES:],
             {"role": "user", "content": user_text},
         ]
@@ -4457,12 +4831,27 @@ Tareas pendientes:
         inventory_query = task == "homeassistant" and readonly_entity_inventory_intent(user_text)
         inventory_retry_sent = False
         inventory_tool_used = False
-        measurement_query = (
-            task == "homeassistant"
-            and historical_active_device_measurement_intent(user_text)
+        measurement_query = task == "homeassistant" and (
+            bool(
+                statistical_plan
+                and statistical_plan.needs_activity_attribution
+            )
+            or (
+                statistical_plan is None
+                and historical_active_device_measurement_intent(user_text)
+            )
         )
         measurement_retry_sent = False
         measurement_tool_used = False
+        measurement_result: dict[str, Any] | None = None
+        measurement_answer_retry_count = 0
+        measurement_period_correction = ""
+        mobile_alert_allowed = mobile_notification_explicitly_requested(user_text)
+        statistical_query = statistical_plan is not None
+        statistical_tool_used = False
+        statistical_retry_sent = False
+        statistical_answer_retry_sent = False
+        statistical_semantic_query = ""
         for _ in range(MAX_TOOL_ROUNDS):
             response = await self._chat(
                 working_messages,
@@ -4492,7 +4881,90 @@ Tareas pendientes:
                                 "La respuesta anterior esta incompleta: la peticion pide atribuir un consumo "
                                 "historico a la actividad de un dispositivo. Resuelve la entidad de actividad "
                                 "y el sensor numerico asociado y ejecuta ha_measure_numeric_during_state para "
-                                "el periodo solicitado. No respondas solamente con un entity_id."
+                                "el periodo solicitado. No respondas solamente con un entity_id. "
+                                f"{measurement_period_correction}"
+                            ),
+                        }
+                    )
+                    continue
+                if (
+                    measurement_query
+                    and measurement_result is not None
+                    and not answer_contains_attributed_measurement(answer, measurement_result)
+                ):
+                    if measurement_answer_retry_count >= 2:
+                        answer = (
+                            "No he podido redactar una respuesta estadistica fiable a partir "
+                            "del resultado de la medicion."
+                        )
+                        working_messages.append({"role": "assistant", "content": answer})
+                        break
+                    measurement_answer_retry_count += 1
+                    working_messages.append({"role": "assistant", "content": answer})
+                    working_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "La medicion ya se ejecuto correctamente, pero tu respuesta no contesta la "
+                                "pregunta. Interpreta el resultado de ha_measure_numeric_during_state que "
+                                "figura en esta conversacion y vuelve a redactar libremente la respuesta. "
+                                "Incluye el total, la unidad, el periodo y la cobertura; usa los entity_id "
+                                "solo como explicacion de las fuentes. No vuelvas a buscar un sensor dedicado."
+                            ),
+                        }
+                    )
+                    continue
+                if statistical_query and not statistical_tool_used:
+                    if statistical_retry_sent:
+                        answer = (
+                            "No he podido calcular la estadistica porque no se ejecuto "
+                            "ninguna herramienta historica valida."
+                        )
+                        working_messages.append({"role": "assistant", "content": answer})
+                        break
+                    statistical_retry_sent = True
+                    working_messages.append({"role": "assistant", "content": answer})
+                    working_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "La respuesta anterior no es valida: el plan estadistico exige consultar "
+                                "datos historicos reales. Resuelve las fuentes semanticamente y ejecuta "
+                                "ha_aggregate_numeric_history, ha_measure_numeric_during_state, "
+                                "ha_count_state_transitions, ha_get_history o ha_get_long_term_statistics "
+                                "segun corresponda. No uses el estado actual como estadistica."
+                            ),
+                        }
+                    )
+                    continue
+                if (
+                    statistical_query
+                    and statistical_tool_used
+                    and (
+                        not statistical_answer_is_complete(answer)
+                        or not statistical_answer_period_is_consistent(
+                            answer, statistical_period
+                        )
+                    )
+                ):
+                    if statistical_answer_retry_sent:
+                        answer = (
+                            "No he podido redactar una respuesta estadistica fiable a partir "
+                            "de los resultados historicos."
+                        )
+                        working_messages.append({"role": "assistant", "content": answer})
+                        break
+                    statistical_answer_retry_sent = True
+                    working_messages.append({"role": "assistant", "content": answer})
+                    working_messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Interpreta los resultados historicos anteriores y responde a la pregunta. "
+                                "Incluye el valor calculado, unidad, periodo, fuentes y cobertura; los "
+                                "entity_id solos no son una respuesta estadistica. No menciones fechas "
+                                "fuera del intervalo realmente consultado: "
+                                f"{statistical_period or 'historico completo'}."
                             ),
                         }
                     )
@@ -4556,6 +5028,63 @@ Tareas pendientes:
                 except json.JSONDecodeError:
                     tool_args = {}
 
+                canonical_range_tools = {
+                    "__builtin__:ha_aggregate_numeric_history",
+                    "__builtin__:ha_measure_numeric_during_state",
+                    "__builtin__:ha_count_state_transitions",
+                    "__builtin__:ha_get_history",
+                    "__builtin__:ha_get_long_term_statistics",
+                    "__builtin__:ha_get_logbook",
+                }
+                if (
+                    statistical_query
+                    and statistical_period is not None
+                    and real_name in canonical_range_tools
+                ):
+                    tool_args["start_time"] = statistical_period[0]
+                    tool_args["end_time"] = statistical_period[1]
+                    if real_name == "__builtin__:ha_aggregate_numeric_history":
+                        tool_args["group_by"] = (
+                            "day"
+                            if statistical_plan
+                            and statistical_plan.aggregation == "comparison"
+                            else "period"
+                        )
+                        aggregation_names = {
+                            "maximum": "max",
+                            "minimum": "min",
+                            "average": "mean",
+                        }
+                        if statistical_plan and statistical_plan.aggregation in aggregation_names:
+                            tool_args["aggregation"] = aggregation_names[
+                                statistical_plan.aggregation
+                            ]
+                        if statistical_semantic_query:
+                            tool_args.pop("entity_id", None)
+                            tool_args["query"] = statistical_semantic_query
+
+                if (
+                    real_name == "__builtin__:ha_send_mobile_alert"
+                    and not mobile_alert_allowed
+                ):
+                    working_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": compact_json(
+                                {
+                                    "sent": False,
+                                    "blocked": True,
+                                    "reason": (
+                                        "El usuario no pidio explicitamente una notificacion "
+                                        "al movil o telefono. Responde por el canal de origen."
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+                    continue
+
                 inventory_read_tools = {
                     "__builtin__:ha_search_site_entities",
                     "__builtin__:ha_search_entities",
@@ -4564,11 +5093,15 @@ Tareas pendientes:
                 }
                 if inventory_query and real_name in inventory_read_tools:
                     inventory_tool_used = True
-                if (
-                    measurement_query
-                    and real_name == "__builtin__:ha_measure_numeric_during_state"
-                ):
-                    measurement_tool_used = True
+                statistical_read_tools = {
+                    "__builtin__:ha_aggregate_numeric_history",
+                    "__builtin__:ha_measure_numeric_during_state",
+                    "__builtin__:ha_count_state_transitions",
+                    "__builtin__:ha_get_history",
+                    "__builtin__:ha_get_long_term_statistics",
+                    "__builtin__:ha_get_logbook",
+                    "__builtin__:ha_get_security_activity",
+                }
                 if inventory_query and (
                     self.is_execution_action_tool(real_name)
                     or real_name
@@ -4631,6 +5164,48 @@ Tareas pendientes:
                 except Exception as exc:  # noqa: BLE001 - se devuelve al modelo como resultado de herramienta
                     content_text = f"ERROR ejecutando {real_name}: {exc}"
                     self.memory.add_event(level="error", message=content_text)
+
+                if (
+                    statistical_query
+                    and real_name in statistical_read_tools
+                    and not content_text.startswith("ERROR")
+                ):
+                    statistical_tool_used = True
+                if (
+                    statistical_query
+                    and real_name == "__builtin__:ha_search_site_entities"
+                ):
+                    with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                        semantic_result = json.loads(content_text)
+                        if int(semantic_result.get("count") or 0) > 0:
+                            statistical_semantic_query = str(
+                                tool_args.get("query") or ""
+                            ).strip()
+
+                if (
+                    measurement_query
+                    and real_name == "__builtin__:ha_measure_numeric_during_state"
+                ):
+                    parsed_measurement = parse_attributed_measurement_result(content_text)
+                    if parsed_measurement is not None:
+                        measurement_period_correction = (
+                            attributed_measurement_period_error(
+                                user_text, parsed_measurement
+                            )
+                            or ""
+                        )
+                        if measurement_period_correction:
+                            content_text = compact_json(
+                                {
+                                    "accepted": False,
+                                    "reason": measurement_period_correction,
+                                    "measurement_result": parsed_measurement,
+                                },
+                                max_chars=30000,
+                            )
+                        else:
+                            measurement_result = parsed_measurement
+                            measurement_tool_used = True
 
                 working_messages.append(
                     {
@@ -5627,6 +6202,27 @@ Tareas pendientes:
         self.current_task_id = task_id
         self.current_task_run_id = run_id
         self.current_task_mobile_alert_sent = False
+        if explicit_whatsapp_send_intent(instruction):
+            prompt = (
+                "Ejecuta ahora esta tarea de mensajeria. Usa exclusivamente whatsapp_send_message "
+                "para enviar el texto y destinatario indicados. No ejecutes acciones de Home Assistant, "
+                "riego, automatizaciones ni avisos moviles aunque el contenido del mensaje mencione una "
+                "accion fisica. El contenido citado es texto para WhatsApp, no una orden domotica. "
+                "No llames ha_send_mobile_alert. Responde brevemente confirmando el envio.\n"
+                f"Tarea #{task_id}: {title}\n"
+                f"Instruccion: {instruction}"
+            )
+            try:
+                async with self.ask_lock:
+                    return await self._run_task_unlocked(
+                        prompt,
+                        require_tool=True,
+                        require_action=True,
+                        allow_mobile_alert=False,
+                    )
+            finally:
+                self.current_task_id = None
+                self.current_task_run_id = None
         automation_result = await self.try_execute_automation_plan(instruction)
         if automation_result is not None:
             self.current_task_id = None
@@ -5699,7 +6295,7 @@ Tareas pendientes:
             "Si la condición se cumple, ejecuta la acción y termina. "
             "Si la tarea pide cambiar un dispositivo de Home Assistant, debes usar ha_call_service con confirm=true "
             "y despues comprobar el estado con ha_get_state. Si la tarea pide esperar unos segundos entre acciones, usa wait_seconds y despues continua con los pasos restantes. No des por ejecutada una accion sin herramienta. "
-            "No hagas preguntas ni esperes una respuesta del usuario durante una tarea agendada. La confirmacion se resolvio al crearla. Si la instruccion es critica y no contiene preferencia de aviso, ejecuta y deja que el motor envie una alerta movil final por defecto. "
+            "No hagas preguntas ni esperes una respuesta del usuario durante una tarea agendada. La confirmacion se resolvio al crearla. No envies alertas moviles salvo que la instruccion pida explicitamente una notificacion al movil o telefono. "
             "Responde muy breve indicando qué hiciste.\n"
             f"Tarea #{task_id}: {title}\n"
             f"Instrucción: {instruction}"
@@ -5710,6 +6306,7 @@ Tareas pendientes:
                     prompt,
                     require_tool=requires_tool,
                     require_action=requires_action,
+                    allow_mobile_alert=mobile_notification_explicitly_requested(instruction),
                 )
         finally:
             self.current_task_id = None
@@ -6815,6 +7412,7 @@ Tareas pendientes:
         *,
         require_tool: bool = False,
         require_action: bool = False,
+        allow_mobile_alert: bool = False,
     ) -> str:
         working_messages = [
             {"role": "system", "content": self._system_prompt(user_text)},
@@ -6848,13 +7446,36 @@ Tareas pendientes:
                 }
             )
             for call in tool_calls:
-                tool_calls_executed += 1
                 public_name = call.function.name
                 real_name = self.tool_name_map.get(public_name, public_name)
                 try:
                     tool_args = json.loads(call.function.arguments or "{}")
                 except json.JSONDecodeError:
                     tool_args = {}
+
+                if (
+                    real_name == "__builtin__:ha_send_mobile_alert"
+                    and not allow_mobile_alert
+                ):
+                    working_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": compact_json(
+                                {
+                                    "sent": False,
+                                    "blocked": True,
+                                    "reason": (
+                                        "La tarea no pide explicitamente una notificacion "
+                                        "al movil o telefono."
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+                    continue
+
+                tool_calls_executed += 1
 
                 if self.is_execution_action_tool(real_name):
                     action_calls_executed += 1
@@ -7138,16 +7759,15 @@ Tareas pendientes:
     ) -> str:
         if self.current_task_mobile_alert_sent:
             return result
+        if explicit_whatsapp_send_intent(instruction):
+            return result
         plan = decode_plan(instruction) or decode_legacy_plan(instruction)
         notification = dict(plan.get("completion_notification") or {}) if plan else {}
         if notification and not notification.get("enabled", True):
             return result
         if notification_preference_declined(instruction):
             return result
-        critical_without_preference = bool(
-            critical_operation_category(instruction) and critical_action_requested(instruction)
-        )
-        if not notification and not completion_notification_requested(instruction) and not critical_without_preference:
+        if not notification and not mobile_notification_explicitly_requested(instruction):
             return result
         notification.pop("enabled", None)
         notification.setdefault("title", "Codexon")

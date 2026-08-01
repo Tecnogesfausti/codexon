@@ -306,10 +306,11 @@ HOMEASSISTANT_TOOLS: dict[str, BuiltinTool] = {
     "ha_search_site_entities": BuiltinTool(
         name="ha_search_site_entities",
         description=(
-            "Consulta de solo lectura para contar o listar colecciones semánticas del perfil local "
-            "(roles, aliases, tags, area y kind) y devuelve sus entity_id con estado real. Úsala antes "
-            "de responder cuántos dispositivos hay o cuáles son cuando el usuario emplea nombres "
-            "naturales como 'grifos de la huerta'. No crea tareas ni acciona entidades."
+            "Resuelve semanticamente entidades del perfil local mediante roles, aliases, tags, area y kind, "
+            "y devuelve sus entity_id con estado real. Sirve tanto para inventarios como para localizar las "
+            "fuentes de una estadistica por funcion y zona (por ejemplo sensores de temperatura interior, "
+            "controlador de una zona o contador compartido), sin depender de nombres exactos. No crea tareas "
+            "ni acciona entidades."
         ),
         parameters=object_schema(
             {
@@ -493,7 +494,7 @@ HOMEASSISTANT_TOOLS: dict[str, BuiltinTool] = {
                 "query": {"type": "string", "description": "Texto para buscar el sensor si no das entity_id."},
                 "domain": {"type": "string", "default": "sensor"},
                 "device_class": {"type": "string", "description": "Clase opcional, por ejemplo water, energy o temperature."},
-                "group_by": {"type": "string", "enum": ["hour", "day", "week"], "default": "day"},
+                "group_by": {"type": "string", "enum": ["period", "hour", "day", "week"], "default": "day"},
                 "aggregation": {
                     "type": "string",
                     "enum": ["min", "max", "mean", "first", "last", "delta"],
