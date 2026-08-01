@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+
+- Corregida la migración del núcleo SegurAI persistente: cada revisión sincroniza todo el código empaquetado, incluidas herramientas, servicios e intents.
+- Los archivos instalados que cambien se conservan antes en `/data/segurai/backups/runtime-0.2.9-previous`; memorias, sesiones de WhatsApp y demás datos quedan fuera de la sincronización.
+
 ## 0.2.8
 
 - La barra `Ctrl`, `Esc`, `Tab` y flechas se muestra siempre dentro de Terminal, sin depender de cómo el WebView Android anuncie el puntero o el ancho.

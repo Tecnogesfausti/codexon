@@ -73,22 +73,18 @@ if [[ ! -f /data/segurai/app/segurai.py ]]; then
   rsync -a /opt/segurai/app/ /data/segurai/app/
 fi
 
-SEGURAI_RUNTIME_MIGRATION=runtime-0.2.2
+SEGURAI_RUNTIME_MIGRATION=runtime-0.2.9
 SEGURAI_MIGRATION_DIR=/data/segurai/migrations
 SEGURAI_MIGRATION_MARKER="${SEGURAI_MIGRATION_DIR}/${SEGURAI_RUNTIME_MIGRATION}"
 if [[ ! -f "$SEGURAI_MIGRATION_MARKER" ]]; then
   SEGURAI_RUNTIME_BACKUP="/data/segurai/backups/${SEGURAI_RUNTIME_MIGRATION}-previous"
   mkdir -p "$SEGURAI_MIGRATION_DIR" "$SEGURAI_RUNTIME_BACKUP"
-  for relative_path in segurai.py segurai_web.py services/whatsapp_bridge.py; do
-    bundled_path="/opt/segurai/app/${relative_path}"
-    installed_path="/data/segurai/app/${relative_path}"
-    if [[ -f "$installed_path" ]] && ! cmp -s "$bundled_path" "$installed_path"; then
-      mkdir -p "${SEGURAI_RUNTIME_BACKUP}/$(dirname "$relative_path")"
-      cp -a "$installed_path" "${SEGURAI_RUNTIME_BACKUP}/${relative_path}"
-    fi
-    mkdir -p "$(dirname "$installed_path")"
-    cp -a "$bundled_path" "$installed_path"
-  done
+  rsync -a \
+    --exclude='.git/' \
+    --backup \
+    --backup-dir="$SEGURAI_RUNTIME_BACKUP" \
+    /opt/segurai/app/ \
+    /data/segurai/app/
   date -Is >"$SEGURAI_MIGRATION_MARKER"
 fi
 
