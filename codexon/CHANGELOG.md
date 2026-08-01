@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- Añadida una importación local de una sola vez desde `/share/codexon-migration` para trasladar sesiones Codex/GitHub, memoria, tareas, perfiles, enseñanzas, copias y WhatsApp al volumen del nuevo add-on.
+- La importación no sustituye el código empaquetado de Codexon y deja un marcador persistente para impedir repeticiones accidentales.
+
 ## 0.3.1
 
 - Codexon usa una red de contenedor aislada para poder convivir con instalaciones anteriores sin competir por el puerto Ingress interno `8099`.

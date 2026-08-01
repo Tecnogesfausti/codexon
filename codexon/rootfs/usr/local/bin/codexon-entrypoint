@@ -67,13 +67,29 @@ fi
 export SUPERVISOR_URL="http://supervisor"
 
 mkdir -p "$CODEX_HOME" "$WORKSPACE" "$PLATFORMIO_CORE_DIR" "$PLATFORMIO_PACKAGES_DIR" /data/logs /data/mcp /data/codexon /run/sshd
+
+CODEXON_IMPORT_ROOT=/share/codexon-migration
+CODEXON_IMPORT_MARKER=/data/codexon/migrations/local-data-v1
+if [[ -d "$CODEXON_IMPORT_ROOT" && ! -f "$CODEXON_IMPORT_MARKER" ]]; then
+  echo "[codexon] importing persistent data from the migration bundle"
+  mkdir -p "$CODEX_HOME" /data/codexon/migrations
+  if [[ -d "$CODEXON_IMPORT_ROOT/codex" ]]; then
+    rsync -a "$CODEXON_IMPORT_ROOT/codex/" "$CODEX_HOME/"
+  fi
+  if [[ -d "$CODEXON_IMPORT_ROOT/codexon" ]]; then
+    rsync -a "$CODEXON_IMPORT_ROOT/codexon/" /data/codexon/
+  fi
+  date -Is >"$CODEXON_IMPORT_MARKER"
+  echo "[codexon] persistent data import completed"
+fi
+
 chmod 700 "$CODEX_HOME"
 if [[ ! -f /data/codexon/app/codexon.py ]]; then
   mkdir -p /data/codexon/app
   rsync -a /opt/codexon/app/ /data/codexon/app/
 fi
 
-CODEXON_RUNTIME_MIGRATION=runtime-0.3.1
+CODEXON_RUNTIME_MIGRATION=runtime-0.3.2
 CODEXON_MIGRATION_DIR=/data/codexon/migrations
 CODEXON_MIGRATION_MARKER="${CODEXON_MIGRATION_DIR}/${CODEXON_RUNTIME_MIGRATION}"
 if [[ ! -f "$CODEXON_MIGRATION_MARKER" ]]; then
