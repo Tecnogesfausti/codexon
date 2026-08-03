@@ -481,8 +481,9 @@ HOMEASSISTANT_TOOLS: dict[str, BuiltinTool] = {
     "ha_aggregate_numeric_history": BuiltinTool(
         name="ha_aggregate_numeric_history",
         description=(
-            "Agrupa el historico numerico de cualquier sensor por hora, dia o semana y calcula min, max, media, "
-            "primero, ultimo o delta. Usala para comparar periodos: que dia se consumio mas agua/energia, "
+            "Agrupa el historico numerico de cualquier sensor por hora, dia o semana. Calcula en Python min, max, "
+            "media, mediana, desviacion poblacional, tendencia lineal diaria, z-score, primero, ultimo y delta. "
+            "Usala para comparar periodos: que dia se consumio mas agua/energia, "
             "que hora tuvo mayor potencia o que semana tuvo la temperatura media mas alta. En contadores que "
             "se reinician cada dia, usa group_by=day y aggregation=max."
         ),
@@ -497,7 +498,7 @@ HOMEASSISTANT_TOOLS: dict[str, BuiltinTool] = {
                 "group_by": {"type": "string", "enum": ["period", "hour", "day", "week"], "default": "day"},
                 "aggregation": {
                     "type": "string",
-                    "enum": ["min", "max", "mean", "first", "last", "delta"],
+                    "enum": ["min", "max", "mean", "median", "stddev", "trend", "zscore", "first", "last", "delta"],
                     "default": "max",
                 },
                 "timezone": {"type": "string", "default": "Europe/Madrid"},

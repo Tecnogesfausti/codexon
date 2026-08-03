@@ -12,6 +12,7 @@ from codexon import (
     answer_contains_attributed_measurement,
     attributed_measurement_period_error,
     canonical_statistical_period,
+    codex_maintenance_prompt,
     completion_notification_requested,
     critical_action_requested,
     explicit_whatsapp_send_intent,
@@ -25,10 +26,12 @@ from codexon import (
     requested_history_date,
     readonly_entity_inventory_intent,
     requested_weekday_date,
+    run_codex_maintenance,
     scheduling_intent_hint,
     should_offer_critical_completion_alert,
     statistical_answer_is_complete,
     statistical_answer_period_is_consistent,
+    extract_statistical_escalation,
     task_recovery_policy,
 )
 from site_profile import SiteProfile
@@ -133,6 +136,34 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
             "revisar el correo",
         )
 
+    def test_codex_maintenance_prompt_preserves_user_request_and_safety_scope(self) -> None:
+        prompt = codex_maintenance_prompt(
+            "enséñame a apagar el aire cuando suba el precio de la luz"
+        )
+
+        self.assertIn("apagar el aire", prompt)
+        self.assertIn("/data/codexon/teach/latest.md", prompt)
+        self.assertIn("no publiques en GitHub", prompt)
+
+    def test_codex_command_records_note_and_opens_interactive_cli(self) -> None:
+        completed = type("Completed", (), {"returncode": 0})()
+        with patch("codexon.create_teaching_note") as create_note:
+            with patch("codexon.subprocess.run", return_value=completed) as run:
+                with patch.dict("os.environ", {"CODEXON_WORKSPACE": "/ha_config", "CODEX_MODEL": "test-model"}):
+                    ok = run_codex_maintenance("corrige el control del aire")
+
+        self.assertTrue(ok)
+        create_note.assert_called_once_with("corrige el control del aire")
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ["codex", "--model", "test-model"])
+        self.assertIn("corrige el control del aire", command[3])
+        self.assertNotIn("capture_output", run.call_args.kwargs)
+
+    def test_codex_command_requires_an_instruction(self) -> None:
+        with patch("codexon.subprocess.run") as run:
+            self.assertFalse(run_codex_maintenance(""))
+        run.assert_not_called()
+
     def test_entity_inventory_questions_are_read_only_queries(self) -> None:
         self.assertTrue(
             readonly_entity_inventory_intent("casa cuantos grifos puedo encender?")
@@ -169,6 +200,7 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
                 {
                     "kind": "statistical",
                     "metric": "temperatura interior",
+                    "semantic_query": "temperatura interior casa",
                     "aggregation": "maximum",
                     "scope": "casa",
                     "period_status": "explicit",
@@ -187,6 +219,7 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
         self.assertIsNotNone(plan)
         self.assertEqual(plan.aggregation, "maximum")
         self.assertEqual(plan.scope, "casa")
+        self.assertEqual(plan.semantic_query, "temperatura interior casa")
         period = canonical_statistical_period(
             plan,
             now=dt.datetime.fromisoformat("2026-08-02T10:00:00+02:00"),
@@ -195,6 +228,36 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
         self.assertEqual(period[1], "2026-08-02T10:00:00+02:00")
         self.assertIsNone(
             parse_semantic_statistical_plan('{"kind":"other"}')
+        )
+
+    def test_sensor_architecture_links_measurements_and_activity(self) -> None:
+        plan = parse_semantic_statistical_plan(
+            json.dumps(
+                {
+                    "kind": "statistical",
+                    "metric": "caudal",
+                    "semantic_query": "irrigation",
+                    "aggregation": "sum",
+                    "scope": "bonsais",
+                    "period_status": "explicit",
+                    "period_text": "esta semana",
+                    "period_kind": "current_week",
+                    "needs_activity_attribution": True,
+                    "activity_scope": "bonsais",
+                }
+            )
+        )
+
+        architecture = self.agent.sensor_architecture_context(plan)
+        entities = {node["entity_id"] for node in architecture["nodes"]}
+        self.assertIn("sensor.controlh2oficina_acumulado_temporal_caudalimetro", entities)
+        self.assertIn("switch.riego2_rele1", entities)
+        self.assertTrue(
+            any(
+                relationship.get("type") == "shared_functional_system"
+                and relationship.get("group") == "irrigation"
+                for relationship in architecture["relationships"]
+            )
         )
 
     def test_statistical_answer_cannot_be_only_an_entity_id(self) -> None:
@@ -213,6 +276,14 @@ class ScheduledTaskClassificationTest(unittest.TestCase):
                 "No hay datos suficientes para calcular el maximo."
             )
         )
+
+    def test_statistical_escalation_marker_is_internal(self) -> None:
+        answer, reason = extract_statistical_escalation(
+            "La media fue 418 L/dia.\nESCALATE_STATISTICS: dos fuentes se contradicen"
+        )
+
+        self.assertEqual(answer, "La media fue 418 L/dia.")
+        self.assertEqual(reason, "dos fuentes se contradicen")
 
     def test_statistical_answer_rejects_dates_outside_real_period(self) -> None:
         period = (
@@ -1182,6 +1253,50 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(action["service"], "turn_on")
         self.assertEqual(action["target"]["entity_id"], "switch.nspanel_relay_2")
         self.assertIn("estado final on", result)
+
+    async def test_input_boolean_action_preserves_domain_and_power_verification(self) -> None:
+        agent = CodexonAgent.__new__(CodexonAgent)
+        agent.resolve_site_alias = lambda instruction: (
+            "input_boolean.brokton_ac_dp1_switch",
+            "aire acondicionado principal",
+        )
+        calls: list[tuple[str, dict]] = []
+
+        async def fake_call(real_name: str, args: dict) -> str:
+            calls.append((real_name, args))
+            if real_name == "__builtin__:ha_call_service":
+                return json.dumps({"power_verification": {"verified": True}})
+            if real_name == "__builtin__:ha_get_state":
+                return json.dumps({"entity_id": args["entity_id"], "state": "off"})
+            raise AssertionError(real_name)
+
+        agent.call_builtin_tool = fake_call
+        result = await agent.try_execute_known_switch_action_task(
+            "Apaga el aire acondicionado principal y verifica una bajada de potencia"
+        )
+
+        action = next(args for name, args in calls if name == "__builtin__:ha_call_service")
+        self.assertEqual(action["domain"], "input_boolean")
+        self.assertEqual(action["service"], "turn_off")
+        self.assertIn("Potencia verificada", result)
+
+    async def test_input_boolean_action_rejects_failed_power_verification(self) -> None:
+        agent = CodexonAgent.__new__(CodexonAgent)
+        agent.resolve_site_alias = lambda instruction: (
+            "input_boolean.brokton_ac_dp1_switch",
+            "aire acondicionado principal",
+        )
+
+        async def fake_call(real_name: str, args: dict) -> str:
+            if real_name == "__builtin__:ha_call_service":
+                return json.dumps({"power_verification": {"verified": False, "reason": "delta_too_small"}})
+            if real_name == "__builtin__:ha_get_state":
+                return json.dumps({"entity_id": args["entity_id"], "state": "off"})
+            raise AssertionError(real_name)
+
+        agent.call_builtin_tool = fake_call
+        with self.assertRaisesRegex(RuntimeError, "no se verificó el cambio de potencia"):
+            await agent.try_execute_known_switch_action_task("Apaga el aire acondicionado principal")
 
     async def test_deterministic_water_payload_is_not_treated_as_switch_action(self) -> None:
         agent = CodexonAgent.__new__(CodexonAgent)

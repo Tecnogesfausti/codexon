@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime as dt
 import json
@@ -65,6 +66,15 @@ MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
 app = FastAPI(title="Codexon", version="0.3.4")
+
+
+@app.middleware("http")
+async def disable_portal_cache(request: Any, call_next: Any) -> Any:
+    response = await call_next(request)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def utc_now() -> str:
@@ -289,7 +299,35 @@ async def build_model_router(*, refresh: bool = False) -> ModelRouter:
     return ModelRouter(Path(os.getenv("CODEXON_MODEL_ROUTES", DEFAULT_MODEL_ROUTES)), MODEL_CATALOG_CACHE)
 
 
-def model_row(router: ModelRouter, model_id: str, selected_model: str | None) -> dict[str, Any]:
+MODEL_SELECTION_TARGETS = {
+    "general": {
+        "label": "Conversacion, HA y memoria",
+        "setting": "interactive_model",
+        "route": "homeassistant",
+    },
+    "classification": {
+        "label": "Clasificacion",
+        "setting": "classification_model",
+        "route": "classification",
+    },
+    "statistical_planning": {
+        "label": "Planificacion estadistica",
+        "setting": "statistical_planning_model",
+        "route": "statistical_planning",
+    },
+    "statistical_reasoning": {
+        "label": "Razonamiento estadistico",
+        "setting": "statistical_reasoning_model",
+        "route": "statistical_reasoning",
+    },
+}
+
+
+def model_row(
+    router: ModelRouter,
+    model_id: str,
+    selected_models: dict[str, str | None],
+) -> dict[str, Any]:
     meta = router.model_catalog.get(model_id) or {}
     raw_input_price = float(meta.get("input_price_per_million") or 0)
     raw_output_price = float(meta.get("output_price_per_million") or 0)
@@ -298,7 +336,12 @@ def model_row(router: ModelRouter, model_id: str, selected_model: str | None) ->
     return {
         "id": model_id,
         "name": meta.get("name") or model_id,
-        "selected": model_id == selected_model,
+        "selected": model_id in selected_models.values(),
+        "selected_targets": [
+            target
+            for target, selected_model in selected_models.items()
+            if model_id == selected_model
+        ],
         "configured": model_id in router.configured_models(),
         "supports_tools": bool(meta.get("supports_tools")),
         "supports_chat": bool(meta.get("supports_chat", True)),
@@ -357,11 +400,36 @@ def write_agent_config(data: dict[str, Any]) -> None:
 
 
 class WebMemory:
+    def __init__(self) -> None:
+        self.conn = connect_db()
+
     def add_observation(self, *, source: str, summary: str, raw: str | None = None) -> None:
-        execute_db(
+        self.conn.execute(
             "INSERT INTO observations(created_at, source, summary, raw) VALUES (?, ?, ?, ?)",
             (utc_now(), source[:80], summary.strip(), raw),
         )
+        self.conn.commit()
+
+    def get_setting(self, key: str, default: str = "") -> str:
+        row = self.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+    def set_setting(self, key: str, value: str | None) -> None:
+        if value is None:
+            self.conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        else:
+            self.conn.execute(
+                """
+                INSERT INTO settings(key, value, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                """,
+                (key, value, utc_now()),
+            )
+        self.conn.commit()
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self.conn.close()
 
 
 @dataclasses.dataclass
@@ -376,6 +444,14 @@ class WebCodexonContext:
         return bool(self.ha_base_url and self.ha_token and self.httpx is not None)
 
 
+def web_ha_base_url() -> str | None:
+    value = os.getenv("HOME_ASSISTANT_URL") or os.getenv("HA_BASE_URL") or os.getenv("HA_URL")
+    if not value:
+        return None
+    value = value.rstrip("/")
+    return value[:-4] if value.endswith("/api") else value
+
+
 def build_agent_manager() -> AgentManager:
     manager = AgentManager(
         AGENTS_DIR,
@@ -383,8 +459,8 @@ def build_agent_manager() -> AgentManager:
             "memory": WebMemory(),
             "live_context": LiveContextManager(),
             "codexon": WebCodexonContext(
-                ha_base_url=os.getenv("HOME_ASSISTANT_URL") or os.getenv("HA_BASE_URL"),
-                ha_token=os.getenv("HOME_ASSISTANT_TOKEN") or os.getenv("HA_TOKEN"),
+                ha_base_url=web_ha_base_url(),
+                ha_token=os.getenv("HOME_ASSISTANT_TOKEN") or os.getenv("HA_TOKEN") or os.getenv("HA_LONG_LIVED_TOKEN"),
                 httpx=httpx,
             ),
         },
@@ -393,8 +469,67 @@ def build_agent_manager() -> AgentManager:
     return manager
 
 
-def agent_rows() -> list[dict[str, Any]]:
-    manager = build_agent_manager()
+AGENT_PRESENTATION = {
+    "especialista_presencia_seguridad": {
+        "purpose": "Fusionar señales de presencia y seguridad antes de elevar una alerta.",
+        "inputs": "Radares, infrarrojos y detección de personas de HA",
+        "output": "Hallazgo v1 con evidencia, confianza, zona y urgencia",
+    },
+    "especialista_agua_riego": {
+        "purpose": "Relacionar válvulas, zonas, caudal, alarmas y volúmenes de riego.",
+        "inputs": "Riego1, Riego2, contadores y sensores de agua de HA",
+        "output": "Hallazgo v1 de actividad, consumo o anomalía",
+    },
+    "especialista_confort_climatico": {
+        "purpose": "Combinar el ambiente interior con clima y calidad del aire exterior.",
+        "inputs": "Temperatura, humedad, CO₂, meteorología y aire",
+        "output": "Hallazgo v1 con recomendación de confort",
+    },
+    "especialista_estado_tecnico": {
+        "purpose": "Agrupar fallos técnicos por sistema y criticidad.",
+        "inputs": "Estados HA, disponibilidad y baterías",
+        "output": "Hallazgo v1 de mantenimiento priorizado",
+    },
+    "especialista_verificador_acciones": {
+        "purpose": "Comprobar que una acción terminó en el estado solicitado.",
+        "inputs": "Expectativas registradas por Codexon y estado HA posterior",
+        "output": "Hallazgo v1: correcto, inesperado o entidad ausente",
+    },
+    "especialista_aprendizaje_hogar": {
+        "purpose": "Auditar alias, sustituciones, zonas y relaciones aprendidas.",
+        "inputs": "Catálogo semántico y enseñanzas persistentes",
+        "output": "Hallazgo v1 de cobertura o contradicción",
+    },
+    "monitor_trafico": {
+        "purpose": "Detectar incidencias en carretera antes de un desplazamiento.",
+        "inputs": "DGT y carreteras configuradas",
+        "output": "Observacion y propuesta de ruta alternativa",
+    },
+    "monitor_clima_exterior": {
+        "purpose": "Relacionar calor, lluvia, viento y humedad con ventilacion, persianas y riego.",
+        "inputs": "Proveedor meteorologico de Live Context",
+        "output": "Observacion y recomendaciones, sin actuar",
+    },
+    "monitor_temperatura": {
+        "purpose": "Detectar temperaturas fuera de rango, lecturas antiguas y cambios bruscos.",
+        "inputs": "Sensores HA con device_class temperature",
+        "output": "Observacion con sensores afectados",
+    },
+    "monitor_dispositivos_caidos": {
+        "purpose": "Localizar unavailable/unknown, entidades sin actualizar y baterias bajas.",
+        "inputs": "Sensores, binarios, switches y luces de HA",
+        "output": "Observacion y propuesta de mantenimiento",
+    },
+    "monitor_calidad_aire": {
+        "purpose": "Valorar si conviene ventilar o hacer actividad exterior.",
+        "inputs": "Indice europeo de calidad del aire de Live Context",
+        "output": "Observacion y recomendaciones, sin actuar",
+    },
+}
+
+
+def agent_rows(manager: AgentManager | None = None) -> list[dict[str, Any]]:
+    manager = manager or build_agent_manager()
     config = read_agent_config().get("agents", {})
     rows = []
     for row in manager.list_agents():
@@ -403,6 +538,29 @@ def agent_rows() -> list[dict[str, Any]]:
         row["effective_priority"] = int(overrides.get("priority", row["priority"]))
         row["effective_frequency_seconds"] = int(overrides.get("frequency_seconds", row["frequency_seconds"]))
         row["overrides"] = overrides
+        presentation = AGENT_PRESENTATION.get(row["name"], {})
+        row.update(presentation)
+        observations = sqlite_rows(
+            """
+            SELECT created_at, summary
+            FROM observations
+            WHERE source = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (row["name"],),
+        )
+        count_rows = sqlite_rows(
+            "SELECT COUNT(*) AS count FROM observations WHERE source = ?",
+            (row["name"],),
+        )
+        row["observation_count"] = int(count_rows[0]["count"] or 0) if count_rows else 0
+        row["last_observation"] = observations[0] if observations else None
+        row["execution_mode"] = "scheduled" if row["enabled"] else "paused"
+        row["uses_llm"] = False
+        row["finding_contract"] = "codexon.agent_finding.v1" if row["name"].startswith("especialista_") else None
+        row["agent_kind"] = "specialist" if row["name"].startswith("especialista_") else "legacy_monitor"
+        row["status_label"] = "Programado por el núcleo" if row["enabled"] else "Pausado; permite prueba manual"
         rows.append(row)
     return sorted(rows, key=lambda item: (-int(item["effective_priority"]), item["name"]))
 
@@ -1048,7 +1206,12 @@ def api_delete_task(task_id: int) -> dict[str, Any]:
 @app.get("/api/agents")
 def api_agents() -> dict[str, Any]:
     manager = build_agent_manager()
-    return {"agents": agent_rows(), "load_errors": manager.load_errors}
+    rows = agent_rows(manager)
+    return {
+        "agents": [row for row in rows if row["agent_kind"] == "specialist"],
+        "legacy_agents": [row for row in rows if row["agent_kind"] == "legacy_monitor"],
+        "load_errors": manager.load_errors,
+    }
 
 
 @app.patch("/api/agents/{name}")
@@ -1144,7 +1307,10 @@ async def api_models(
     refresh: bool = False,
 ) -> dict[str, Any]:
     router = await build_model_router(refresh=refresh)
-    selected_model = get_setting("interactive_model") or None
+    selected_models = {
+        target: get_setting(config["setting"]) or None
+        for target, config in MODEL_SELECTION_TARGETS.items()
+    }
     models = router.configured_models() if configured_only else router.selectable_models()
     if query.strip():
         folded = normalize_cancellation_key(query)
@@ -1177,26 +1343,42 @@ async def api_models(
     page = max(1, min(int(page or 1), total_pages))
     start = (page - 1) * page_size
     visible = models[start : start + page_size]
-    default_model = router.config.get("routes", {}).get("homeassistant", {}).get("model") or router.config.get("default")
+    routes = router.config.get("routes", {})
+    profiles = {}
+    for target, config in MODEL_SELECTION_TARGETS.items():
+        route_model = (routes.get(config["route"]) or {}).get("model") or router.config.get("default")
+        profiles[target] = {
+            "label": config["label"],
+            "selected_model": selected_models[target],
+            "effective_model": selected_models[target] or route_model,
+            "automatic": selected_models[target] is None,
+            "default_model": route_model,
+        }
+    default_model = profiles["general"]["default_model"]
     return {
-        "selected_model": selected_model,
-        "effective_model": selected_model or default_model,
-        "automatic": selected_model is None,
+        "selected_model": selected_models["general"],
+        "effective_model": profiles["general"]["effective_model"],
+        "automatic": profiles["general"]["automatic"],
         "default_model": default_model,
+        "profiles": profiles,
         "page": page,
         "page_size": page_size,
         "total": len(models),
         "total_pages": total_pages,
-        "models": [model_row(router, model_id, selected_model) for model_id in visible],
+        "models": [model_row(router, model_id, selected_models) for model_id in visible],
     }
 
 
 @app.post("/api/models/select")
 async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
     requested = str(payload.get("model") or "").strip()
+    target = str(payload.get("target") or "general").strip()
+    target_config = MODEL_SELECTION_TARGETS.get(target)
+    if target_config is None:
+        raise HTTPException(status_code=400, detail="Destino de modelo no valido")
     if requested.lower() in {"", "auto", "automatico", "automático", "router"}:
-        set_setting("interactive_model", None)
-        return {"ok": True, "selected_model": None}
+        set_setting(target_config["setting"], None)
+        return {"ok": True, "target": target, "selected_model": None}
     router = await build_model_router()
     selectable = set(router.selectable_models())
     if requested not in selectable:
@@ -1204,8 +1386,8 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
     metadata = router.model_catalog.get(requested) or {}
     if metadata and not metadata.get("supports_tools"):
         raise HTTPException(status_code=400, detail="Ese modelo no declara soporte de herramientas")
-    set_setting("interactive_model", requested)
-    return {"ok": True, "selected_model": requested}
+    set_setting(target_config["setting"], requested)
+    return {"ok": True, "target": target, "selected_model": requested}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -1278,6 +1460,13 @@ def index() -> str:
     .listener-table .col-activity { width: auto; }
     .listener-table .col-actions { width: 122px; }
     .listener-table th:last-child, .listener-table td:last-child { position: sticky; right: 0; background: #fff; box-shadow: -8px 0 12px rgba(23, 33, 31, .06); }
+    .agent-table { min-width: 1100px; table-layout: fixed; }
+    .agent-table .agent-purpose { width: 27%; }
+    .agent-table .agent-io { width: 24%; }
+    .agent-table .agent-status { width: 16%; }
+    .agent-table .agent-plan { width: 12%; }
+    .agent-table .agent-history { width: auto; }
+    .agent-table .agent-actions { width: 112px; }
     .model-list { display: grid; gap: 8px; }
     .model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; border-top: 1px solid var(--line); padding: 10px 0; }
     .model-row:first-child { border-top: 0; }
@@ -1287,14 +1476,16 @@ def index() -> str:
     code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     pre { white-space: pre-wrap; margin: 0; max-height: 320px; overflow: auto; color: #263631; }
     .pill { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px 8px; margin: 2px; background: rgba(255,255,255,.7); }
-    .row-actions { display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 96px; }
+    .row-actions { display: grid; grid-template-columns: 1fr; gap: 5px; min-width: 190px; }
     .row-actions button { width: 100%; white-space: nowrap; }
+    .profile-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 10px 0; }
+    .profile-summary > span { border: 1px solid var(--line); border-radius: 8px; padding: 8px; overflow-wrap: anywhere; }
     .muted { color: var(--muted); }
     .notice { position: sticky; top: 8px; z-index: 5; display: none; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: white; }
     .notice.error { display: block; border-color: #fecaca; color: var(--danger); }
     .notice.ok { display: block; border-color: #99f6e4; color: var(--brand); }
     .split { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-    @media (max-width: 900px) { .stat, .wide, .side { grid-column: 1 / -1; } header { display: block; } .split { grid-template-columns: 1fr; } .model-row { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .stat, .wide, .side { grid-column: 1 / -1; } header { display: block; } .split, .profile-summary { grid-template-columns: 1fr; } .model-row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -1327,11 +1518,13 @@ def index() -> str:
         <h2>Modelos IA</h2>
         <div class="toolbar">
           <label>Buscar<input id="modelQuery" placeholder="deepseek, gpt, gemini..." oninput="debouncedLoadModels()" /></label>
-          <button class="ghost" onclick="selectModel('auto')">Automatico</button>
+          <label>Perfil automatico<select id="modelAutoTarget"></select></label>
+          <button class="ghost" onclick="selectModel('auto', document.getElementById('modelAutoTarget').value)">Automatico</button>
           <button class="secondary" onclick="loadModels(true)">Actualizar catalogo</button>
           <label><input id="modelSortCost" type="checkbox" onchange="modelState.page = 1; loadModels()" /> menor coste</label>
         </div>
         <p id="modelSummary" class="muted">-</p>
+        <div id="modelProfiles" class="profile-summary"></div>
         <div id="modelList" class="model-list"></div>
         <div class="pager">
           <button class="ghost" onclick="changeModelPage(-1)">Anterior</button>
@@ -1342,11 +1535,13 @@ def index() -> str:
 
       <section class="full" data-page="agentes">
         <h2>Agentes</h2>
-        <div class="table-scroll"><table><thead><tr><th>Agente</th><th>Estado</th><th>Intervalo</th><th>Prioridad</th><th>Ultimo resultado</th><th></th></tr></thead><tbody id="agents"></tbody></table></div>
+        <p id="agentSummary" class="muted">Cargando agentes…</p>
+        <div class="table-scroll"><table class="agent-table"><thead><tr><th class="agent-purpose">Agente y finalidad</th><th class="agent-io">Entradas y salida</th><th class="agent-status">Estado real</th><th class="agent-plan">Plan previsto</th><th class="agent-history">Historial persistente</th><th class="agent-actions"></th></tr></thead><tbody id="agents"></tbody></table></div>
       </section>
 
       <section class="full" data-page="tareas">
         <h2>Tareas</h2>
+        <p id="taskSummary" class="muted">Cargando tareas…</p>
         <div class="split">
           <label>Titulo<input id="taskTitle" placeholder="Revision de sensores" /></label>
           <label>Fecha/hora<input id="taskRunAt" type="datetime-local" /></label>
@@ -1438,12 +1633,23 @@ async function requestJSON(url, options = {}) {
 function text(v) { return v === null || v === undefined || v === '' ? '-' : String(v); }
 function html(v) { return text(v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 const modelState = {page: 1, totalPages: 1, loading: false};
+const modelTargets = [
+  ['general', 'Conversacion, HA y memoria'],
+  ['classification', 'Clasificacion'],
+  ['statistical_planning', 'Planificacion estadistica'],
+  ['statistical_reasoning', 'Razonamiento estadistico'],
+];
+function modelTargetOptions(selected = 'general') {
+  return modelTargets.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
+}
 function money(v) { return v === null || v === undefined ? 'variable' : '$' + Number(v || 0).toFixed(3) + '/M'; }
 function compactNumber(v) { return v ? Number(v).toLocaleString('es-ES') : '-'; }
 function setPage(name) {
   document.querySelectorAll('[data-page]').forEach(node => node.classList.toggle('active', node.dataset.page === name));
   document.querySelectorAll('.tab').forEach(node => node.classList.toggle('active', node.dataset.tab === name));
   if (name === 'modelos') loadModels();
+  if (name === 'tareas') loadTasks();
+  if (name === 'agentes') loadAgents();
 }
 function showNotice(message, kind = 'ok') {
   const node = document.getElementById('notice');
@@ -1454,8 +1660,10 @@ function showNotice(message, kind = 'ok') {
 }
 function isoFromLocal(value) { return value ? new Date(value).toISOString() : null; }
 async function loadAll() {
-  const [status, whatsapp, observations, tasks, listeners, monitor, logs, tools, agents, codex, notes, backups] = await Promise.all([
-    requestJSON('/api/status'), requestJSON('/api/whatsapp'), requestJSON('/api/observations'), requestJSON('/api/tasks'), requestJSON('/api/event-listeners'), requestJSON('/api/task-monitor'), requestJSON('/api/logs'), requestJSON('/api/tools'), requestJSON('/api/agents'), requestJSON('/api/codex/context'), requestJSON('/api/codex/notes'), requestJSON('/api/backups')
+  loadTasks();
+  loadAgents();
+  const [status, whatsapp, observations, listeners, monitor, logs, tools, codex, notes, backups] = await Promise.all([
+    requestJSON('/api/status'), requestJSON('/api/whatsapp'), requestJSON('/api/observations'), requestJSON('/api/event-listeners'), requestJSON('/api/task-monitor'), requestJSON('/api/logs'), requestJSON('/api/tools'), requestJSON('/api/codex/context'), requestJSON('/api/codex/notes'), requestJSON('/api/backups')
   ]);
   document.getElementById('memories').textContent = status.memories;
   document.getElementById('observations').textContent = status.observations;
@@ -1474,11 +1682,21 @@ async function loadAll() {
   document.getElementById('codexNotes').value = notes.text || '';
   document.getElementById('backupDir').textContent = backups.backup_dir + (backups.key_configured ? ' · clave configurada' : ' · sin clave configurada');
   document.getElementById('backupList').innerHTML = backups.backups.length ? backups.backups.map(b => `<li><strong>${html(b.name)}</strong><br><span class="muted">${html(b.bytes)} bytes · ${html(b.path)}</span></li>`).join('') : '<li>Sin backups.</li>';
-  renderTasks(tasks);
   renderListeners(listeners);
   renderMonitor(monitor);
-  renderAgents(agents.agents || []);
   document.getElementById('observationList').innerHTML = observations.length ? observations.map(o => `<li><strong>${html(o.source)}</strong> <span class="muted">${html(o.created_at)}</span><br>${html(o.summary)}</li>`).join('') : '<li>Sin observaciones todavia.</li>';
+}
+async function loadTasks() {
+  const summary = document.getElementById('taskSummary');
+  try {
+    const rows = await requestJSON('/api/tasks?limit=200&include_done=true');
+    renderTasks(rows);
+    summary.textContent = `${rows.length} tareas cargadas · ${new Date().toLocaleTimeString('es-ES')}`;
+  } catch (err) {
+    document.getElementById('tasks').innerHTML = `<tr><td colspan="6">Error cargando tareas: ${html(err.message)}</td></tr>`;
+    summary.textContent = 'No se pudo cargar la lista de tareas.';
+    showNotice(err.message, 'error');
+  }
 }
 function renderMetricMoney(v) { return '$' + Number(v || 0).toFixed(5); }
 function renderMs(v) { return Number(v || 0).toFixed(0) + ' ms'; }
@@ -1517,7 +1735,12 @@ async function loadModels(refresh = false) {
     const data = await requestJSON(`/api/models?page=${modelState.page}&page_size=50&query=${encodeURIComponent(query)}&sort=${sort}&refresh=${refresh ? 'true' : 'false'}`);
     modelState.page = data.page;
     modelState.totalPages = data.total_pages;
-    document.getElementById('modelSummary').textContent = `${data.automatic ? 'Automatico' : 'Seleccionado'}: ${data.effective_model || '-'} · ${data.total} modelos compatibles con chat/tools`;
+    document.getElementById('modelAutoTarget').innerHTML = modelTargetOptions(document.getElementById('modelAutoTarget').value || 'general');
+    document.getElementById('modelSummary').textContent = `${data.total} modelos compatibles con chat y herramientas · cada perfil se configura por separado`;
+    document.getElementById('modelProfiles').innerHTML = modelTargets.map(([target]) => {
+      const profile = data.profiles[target];
+      return `<span><strong>${html(profile.label)}</strong><br><span class="muted">${profile.automatic ? 'Automatico: ' : 'Seleccionado: '}${html(profile.effective_model)}</span></span>`;
+    }).join('');
     document.getElementById('modelPage').textContent = `Pagina ${data.page}/${data.total_pages}`;
     document.getElementById('modelList').innerHTML = data.models.length ? data.models.map(m => `
       <div class="model-row">
@@ -1530,9 +1753,13 @@ async function loadModels(refresh = false) {
             <span class="pill">contexto ${compactNumber(m.context_length)}</span>
             ${m.configured ? '<span class="pill">configurado</span>' : ''}
             ${m.supports_structured_outputs ? '<span class="pill">JSON</span>' : ''}
+            ${(m.selected_targets || []).map(target => `<span class="pill">${html(data.profiles[target].label)}</span>`).join('')}
           </div>
         </div>
-        <button class="${m.selected ? 'ghost' : 'secondary'}" onclick="selectModel('${html(m.id)}')">${m.selected ? 'Activo' : 'Usar'}</button>
+        <div class="row-actions">
+          <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions()}</select>
+          <button class="secondary" onclick="selectModel(${JSON.stringify(m.id)}, this.previousElementSibling.value)">Usar</button>
+        </div>
       </div>`).join('') : '<p class="muted">Sin modelos para ese filtro.</p>';
   } catch (err) {
     showNotice(err.message, 'error');
@@ -1548,23 +1775,40 @@ async function changeModelPage(delta) {
   modelState.page = Math.max(1, Math.min(modelState.totalPages, modelState.page + delta));
   await loadModels();
 }
-async function selectModel(model) {
+async function selectModel(model, target = 'general') {
   try {
-    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model})});
-    showNotice(result.selected_model ? 'Modelo seleccionado: ' + result.selected_model : 'Modelo automatico activado');
+    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model, target})});
+    const label = (modelTargets.find(([value]) => value === target) || [target, target])[1];
+    showNotice(result.selected_model ? `${label}: ${result.selected_model}` : `${label}: router automatico`);
     await loadModels();
   } catch (err) { showNotice(err.message, 'error'); }
 }
 function renderAgents(rows) {
   document.getElementById('agents').innerHTML = rows.length ? rows.map(a => `
     <tr>
-      <td><strong>${html(a.name)}</strong><br><span class="muted">${html(a.description)}</span></td>
-      <td><label><input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="updateAgent('${html(a.name)}', {enabled: this.checked})" /> activo</label></td>
-      <td><input type="number" value="${a.effective_frequency_seconds}" min="1" onchange="updateAgent('${html(a.name)}', {frequency_seconds: this.value})" /></td>
-      <td><input type="number" value="${a.effective_priority}" min="1" max="100" onchange="updateAgent('${html(a.name)}', {priority: this.value})" /></td>
-      <td class="muted">${html(a.stats?.last_message || '-')}</td>
-      <td><button class="secondary" onclick="runAgent('${html(a.name)}')">Ejecutar</button></td>
+      <td><span class="pill">Especialista</span><br><strong>${html(a.name)}</strong><br>${html(a.purpose || a.description)}<br><span class="muted">${html(a.description)}</span></td>
+      <td><strong>Lee:</strong> ${html(a.inputs || (a.entities || []).join(', '))}<br><strong>Produce:</strong> ${html(a.output || 'observacion')}<br><span class="muted">LLM: ${a.uses_llm ? 'si' : 'no; reglas Python'}</span></td>
+      <td><strong>${a.enabled ? 'Programado' : 'Pausado'}</strong><br><span class="muted">${a.enabled ? 'El núcleo lo ejecuta periódicamente.' : 'Solo se ejecuta con «Probar ahora».'}</span></td>
+      <td>Cada ${html(a.effective_frequency_seconds)} s<br>prioridad ${html(a.effective_priority)}<br><span class="muted">sin llamadas LLM ni acciones físicas</span></td>
+      <td>${a.last_observation ? `<strong>${html(a.last_observation.created_at)}</strong><br>${html(a.last_observation.summary)}` : 'Sin observaciones'}<br><span class="muted">${html(a.observation_count)} observaciones guardadas</span></td>
+      <td><div class="row-actions"><button class="secondary" onclick="runAgent('${html(a.name)}')">Probar ahora</button><button class="${a.enabled ? 'warning' : ''}" onclick="updateAgent('${html(a.name)}', {enabled: ${a.enabled ? 'false' : 'true'}})">${a.enabled ? 'Pausar' : 'Activar'}</button></div></td>
     </tr>`).join('') : '<tr><td colspan="6">Sin agentes.</td></tr>';
+}
+async function loadAgents() {
+  const summary = document.getElementById('agentSummary');
+  try {
+    const data = await requestJSON('/api/agents');
+    const rows = data.agents || [];
+    renderAgents(rows);
+    const errors = Object.keys(data.load_errors || {}).length;
+    const legacy = (data.legacy_agents || []).length;
+    const enabled = rows.filter(row => row.enabled).length;
+    summary.textContent = `${rows.length} especialistas v1 · ${enabled} programados · sin acciones físicas${legacy ? ` · ${legacy} monitores antiguos retirados del panel` : ''}${errors ? ` · ${errors} errores de carga` : ''}`;
+  } catch (err) {
+    document.getElementById('agents').innerHTML = `<tr><td colspan="6">Error cargando agentes: ${html(err.message)}</td></tr>`;
+    summary.textContent = 'No se pudo cargar el inventario de agentes.';
+    showNotice(err.message, 'error');
+  }
 }
 function renderTasks(rows) {
   document.getElementById('selectAllTasks').checked = false;
@@ -1702,8 +1946,8 @@ async function deleteSelectedListeners() {
   } catch (err) { showNotice(err.message, 'error'); }
 }
 async function deleteAllTasks() { if (confirm('¿Eliminar definitivamente todas las tareas y su historial de ejecuciones?')) { try { const result = await requestJSON('/api/tasks', {method: 'DELETE'}); showNotice(`Tareas eliminadas: ${result.deleted}`); await loadAll(); } catch (err) { showNotice(err.message, 'error'); } } }
-async function updateAgent(name, payload) { try { await requestJSON(`/api/agents/${encodeURIComponent(name)}`, {method: 'PATCH', body: JSON.stringify(payload)}); showNotice('Agente actualizado'); await loadAll(); } catch (err) { showNotice(err.message, 'error'); } }
-async function runAgent(name) { try { const result = await requestJSON(`/api/agents/${encodeURIComponent(name)}/run`, {method: 'POST'}); showNotice(result.message, result.ok ? 'ok' : 'error'); await loadAll(); } catch (err) { showNotice(err.message, 'error'); } }
+async function updateAgent(name, payload) { try { await requestJSON(`/api/agents/${encodeURIComponent(name)}`, {method: 'PATCH', body: JSON.stringify(payload)}); showNotice(payload.enabled === true ? 'Especialista activado' : payload.enabled === false ? 'Especialista pausado' : 'Especialista actualizado'); await loadAgents(); } catch (err) { showNotice(err.message, 'error'); } }
+async function runAgent(name) { try { const result = await requestJSON(`/api/agents/${encodeURIComponent(name)}/run`, {method: 'POST'}); showNotice(result.message, result.ok ? 'ok' : 'error'); await loadAgents(); } catch (err) { showNotice(err.message, 'error'); } }
 async function refreshCodexContext() { try { await requestJSON('/api/codex/context/refresh', {method: 'POST'}); showNotice('Contexto Codex actualizado'); await loadAll(); } catch (err) { showNotice(err.message, 'error'); } }
 async function createBackup() { try { const pass = document.getElementById('backupPassphrase').value; const result = await requestJSON('/api/backup', {method: 'POST', body: JSON.stringify({passphrase: pass || null})}); showNotice('Backup creado: ' + result.backup.path); document.getElementById('backupPassphrase').value = ''; await loadAll(); } catch (err) { showNotice(err.message, 'error'); } }
 async function saveCodexNotes() { try { await requestJSON('/api/codex/notes', {method: 'POST', body: JSON.stringify({text: document.getElementById('codexNotes').value})}); showNotice('Notas Codex guardadas'); await loadAll(); } catch (err) { showNotice(err.message, 'error'); } }

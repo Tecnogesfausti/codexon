@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import os
+import time
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,14 @@ class CodexonConversation(Protocol):
         user_text: str,
         task: str = "homeassistant",
         preferred_model: str | None = None,
+        budget_mode: str | None = None,
     ) -> str: ...
+
+    def estimate_request_budget(
+        self, user_text: str, *, economy: bool = False
+    ) -> dict[str, Any]: ...
+
+    def total_usage_cost_usd(self) -> float: ...
 
 
 LogFunction = Callable[..., None]
@@ -88,6 +96,60 @@ def parse_wake_words(value: str) -> tuple[str, ...]:
     return tuple(wake_words)
 
 
+def budget_reply_action(value: str) -> str | None:
+    folded = fold_wake_word(value).strip(" .!?¿¡")
+    if folded in {"vamos", "adelante", "hazlo", "ejecuta", "si", "vale", "ok"}:
+        return "execute"
+    if folded in {
+        "mas barato", "algo mas barato", "busca algo mas barato",
+        "busco algo mas barato", "barato", "economico", "modo economico",
+    }:
+        return "economy"
+    if folded in {"cancela", "cancelar", "no", "dejalo", "para"}:
+        return "cancel"
+    return None
+
+
+def format_budget_cents(value: Any) -> str:
+    if value is None:
+        return "coste desconocido"
+    amount = float(value)
+    if amount == 0:
+        return "0"
+    if amount < 0.001:
+        return "<0,001"
+    return f"{amount:.4f}".replace(".", ",").rstrip("0").rstrip(",")
+
+
+def format_budget_preview(estimate: dict[str, Any], *, cheaper: bool = False) -> str:
+    title = "Opcion economica" if cheaper else "Presupuesto previo"
+    lines = [f"{title}:"]
+    for index, stage in enumerate(estimate.get("stages") or [], start=1):
+        suffix = " (si es estadistica)" if stage.get("conditional") else ""
+        cost = (
+            None
+            if stage.get("estimated_cost_usd") is None
+            else float(stage["estimated_cost_usd"]) * 100
+        )
+        lines.append(
+            f"{index}. {stage.get('label')}{suffix}: {stage.get('model')} "
+            f"≈ {format_budget_cents(cost)} centimos USD"
+        )
+    total = estimate.get("estimated_cost_cents_usd")
+    lines.append(f"Total estimado: {format_budget_cents(total)} centimos USD.")
+    if estimate.get("within_threshold") is True:
+        lines.append("Esta por debajo del umbral de 0,2 centimos.")
+    elif estimate.get("within_threshold") is False:
+        lines.append("Supera el umbral de 0,2 centimos.")
+    else:
+        lines.append("Falta precio de catalogo para una etapa; el total no es completo.")
+    lines.append(
+        "Responde «vamos» para ejecutar, «mas barato» para recalcular en modo economico "
+        "o «cancelar»."
+    )
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class WhatsAppBridgeConfig:
     enabled: bool
@@ -139,6 +201,45 @@ class WhatsAppBridge:
         self._messages: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(
             maxsize=self.config.max_pending_messages
         )
+        self._budget_path = self.config.data_dir / "pending-budgets.json"
+
+    def _read_pending_budgets(self) -> dict[str, dict[str, Any]]:
+        try:
+            payload = json.loads(self._budget_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        cutoff = time.time() - 86400
+        return {
+            str(sender): dict(record)
+            for sender, record in payload.items()
+            if isinstance(record, dict)
+            and float(record.get("created_at") or 0) >= cutoff
+        }
+
+    def _write_pending_budgets(self, pending: dict[str, dict[str, Any]]) -> None:
+        self.config.data_dir.mkdir(parents=True, exist_ok=True)
+        temporary = self._budget_path.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(pending, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        temporary.replace(self._budget_path)
+
+    def _pending_budget(self, sender: str) -> dict[str, Any] | None:
+        return self._read_pending_budgets().get(sender)
+
+    def _save_pending_budget(self, sender: str, record: dict[str, Any]) -> None:
+        pending = self._read_pending_budgets()
+        pending[sender] = record
+        self._write_pending_budgets(pending)
+
+    def _pop_pending_budget(self, sender: str) -> dict[str, Any] | None:
+        pending = self._read_pending_budgets()
+        record = pending.pop(sender, None)
+        self._write_pending_budgets(pending)
+        return record
 
     def _read_data_file(self, name: str) -> dict[str, Any]:
         try:
@@ -410,18 +511,30 @@ class WhatsAppBridge:
         body = str(event.get("body") or "").strip()
         if not body:
             return False
+        pending_budget = self._pending_budget(sender_jid)
+        direct_budget_action = budget_reply_action(body)
+        if pending_budget and direct_budget_action:
+            event["budget_reply"] = direct_budget_action
+            return True
         wake_words = self.config.wake_words
         if wake_words:
             matched_length = 0
+            budget_preview = False
             for wake_word in sorted(wake_words, key=len, reverse=True):
+                candidate_budget_preview = False
                 candidate = body[: len(wake_word)]
                 if fold_wake_word(candidate) != fold_wake_word(wake_word):
                     continue
-                if len(body) > len(wake_word):
-                    separator = body[len(wake_word)]
+                end = len(wake_word)
+                if body[end : end + 1] == "$":
+                    candidate_budget_preview = True
+                    end += 1
+                if len(body) > end:
+                    separator = body[end]
                     if not (separator.isspace() or separator in ":,-"):
                         continue
-                matched_length = len(wake_word)
+                matched_length = end
+                budget_preview = candidate_budget_preview
                 break
             if not matched_length:
                 return False
@@ -429,6 +542,12 @@ class WhatsAppBridge:
             if not body:
                 return False
             event["body"] = body
+            if budget_preview:
+                event["budget_preview"] = True
+            elif pending_budget:
+                action = budget_reply_action(body)
+                if action:
+                    event["budget_reply"] = action
         return True
 
     async def _process_messages(self) -> None:
@@ -440,16 +559,79 @@ class WhatsAppBridge:
             message_id = str(event.get("id") or "")
             try:
                 sender_name = str(event.get("pushName") or recipient).strip()
+                body = str(event.get("body") or "").strip()
                 request = (
                     "[Contexto del canal: mensaje entrante de WhatsApp de "
                     f"{sender_name} ({recipient}). Tu respuesta final se enviará "
                     "automáticamente a este mismo chat; no uses "
                     "whatsapp_send_message para responder a este mensaje.]\n\n"
-                    f"{event['body']}"
+                    f"{body}"
                 )
-                answer = await self.agent.ask(
-                    request, task="homeassistant"
-                )
+                if event.get("budget_preview"):
+                    estimate = self.agent.estimate_request_budget(body, economy=False)
+                    self._save_pending_budget(
+                        recipient,
+                        {
+                            "created_at": time.time(),
+                            "request": body,
+                            "mode": "normal",
+                            "estimate": estimate,
+                        },
+                    )
+                    answer = format_budget_preview(estimate)
+                elif event.get("budget_reply"):
+                    action = str(event["budget_reply"])
+                    pending = self._pending_budget(recipient)
+                    if not pending:
+                        answer = "Ese presupuesto ya no esta pendiente. Envia una nueva orden con casa$."
+                    elif action == "cancel":
+                        self._pop_pending_budget(recipient)
+                        answer = "Presupuesto cancelado; no he ejecutado la peticion."
+                    elif action == "economy":
+                        estimate = self.agent.estimate_request_budget(
+                            str(pending["request"]), economy=True
+                        )
+                        pending.update(
+                            created_at=time.time(), mode="economy", estimate=estimate
+                        )
+                        self._save_pending_budget(recipient, pending)
+                        answer = format_budget_preview(estimate, cheaper=True)
+                    else:
+                        pending = self._pop_pending_budget(recipient) or pending
+                        original = str(pending["request"])
+                        execution_request = (
+                            "[Contexto del canal: mensaje entrante de WhatsApp de "
+                            f"{sender_name} ({recipient}). Tu respuesta final se enviará "
+                            "automáticamente a este mismo chat; no uses whatsapp_send_message "
+                            "para responder a este mensaje.]\n\n"
+                            f"{original}"
+                        )
+                        before_cost = self.agent.total_usage_cost_usd()
+                        answer = await self.agent.ask(
+                            execution_request,
+                            task="homeassistant",
+                            budget_mode=str(pending.get("mode") or "normal"),
+                        )
+                        actual_cents = max(
+                            0.0,
+                            (self.agent.total_usage_cost_usd() - before_cost) * 100,
+                        )
+                        estimated_cents = (pending.get("estimate") or {}).get(
+                            "estimated_cost_cents_usd"
+                        )
+                        answer += (
+                            "\n\nCoste LLM real: "
+                            f"{format_budget_cents(actual_cents)} centimos USD"
+                            + (
+                                f"; estimado: {format_budget_cents(estimated_cents)}."
+                                if estimated_cents is not None
+                                else "."
+                            )
+                        )
+                else:
+                    answer = await self.agent.ask(
+                        request, task="homeassistant"
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - hay que contestar al usuario

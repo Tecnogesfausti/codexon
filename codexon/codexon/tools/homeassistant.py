@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import statistics
 import time
 import unicodedata
 from pathlib import Path
@@ -1897,7 +1898,10 @@ def flatten_history_points(history: Any) -> list[dict[str, Any]]:
     return points
 
 
-HISTORY_AGGREGATIONS = {"min", "max", "mean", "first", "last", "delta"}
+HISTORY_AGGREGATIONS = {
+    "min", "max", "mean", "median", "stddev", "trend", "zscore",
+    "first", "last", "delta",
+}
 HISTORY_GROUPS = {"period", "hour", "day", "week"}
 WEEKDAY_NAMES_ES = ("lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo")
 
@@ -1916,13 +1920,50 @@ def numeric_history_group(local_time: dt.datetime, group_by: str) -> tuple[str, 
     return start.date().isoformat(), start
 
 
-def aggregate_numeric_values(values: list[float], aggregation: str) -> float:
+def linear_trend_per_day(samples: list[tuple[dt.datetime, float]]) -> float:
+    if len(samples) < 2:
+        return 0.0
+    origin = samples[0][0]
+    xs = [(when - origin).total_seconds() / 86400 for when, _ in samples]
+    ys = [value for _, value in samples]
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    denominator = sum((value - mean_x) ** 2 for value in xs)
+    if denominator == 0:
+        return 0.0
+    return sum(
+        (x_value - mean_x) * (y_value - mean_y)
+        for x_value, y_value in zip(xs, ys)
+    ) / denominator
+
+
+def numeric_zscore_last(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    stddev = statistics.pstdev(values)
+    if stddev == 0:
+        return 0.0
+    return (values[-1] - statistics.fmean(values)) / stddev
+
+
+def aggregate_numeric_samples(
+    samples: list[tuple[dt.datetime, float]], aggregation: str
+) -> float:
+    values = [value for _, value in samples]
     if aggregation == "min":
         return min(values)
     if aggregation == "max":
         return max(values)
     if aggregation == "mean":
-        return sum(values) / len(values)
+        return statistics.fmean(values)
+    if aggregation == "median":
+        return statistics.median(values)
+    if aggregation == "stddev":
+        return statistics.pstdev(values)
+    if aggregation == "trend":
+        return linear_trend_per_day(samples)
+    if aggregation == "zscore":
+        return numeric_zscore_last(values) or 0.0
     if aggregation == "first":
         return values[0]
     if aggregation == "last":
@@ -2200,7 +2241,12 @@ async def ha_aggregate_numeric_history(context: Any, args: dict[str, Any]) -> st
                 group = groups[key]
                 samples = sorted(group.pop("samples"), key=lambda item: item[0])
                 values = [value for _, value in samples]
-                selected = aggregate_numeric_values(values, aggregation)
+                mean = statistics.fmean(values)
+                median = statistics.median(values)
+                stddev = statistics.pstdev(values)
+                trend = linear_trend_per_day(samples)
+                zscore_last = numeric_zscore_last(values)
+                selected = aggregate_numeric_samples(samples, aggregation)
                 row = {
                     **group,
                     "samples": len(values),
@@ -2208,9 +2254,31 @@ async def ha_aggregate_numeric_history(context: Any, args: dict[str, Any]) -> st
                     "last": rounded_history_value(values[-1]),
                     "min": rounded_history_value(min(values)),
                     "max": rounded_history_value(max(values)),
-                    "mean": rounded_history_value(sum(values) / len(values)),
+                    "mean": rounded_history_value(mean),
+                    "median": rounded_history_value(median),
+                    "stddev_population": rounded_history_value(stddev),
+                    "trend_per_day": rounded_history_value(trend),
+                    "last_zscore": (
+                        rounded_history_value(zscore_last)
+                        if zscore_last is not None
+                        else None
+                    ),
+                    "last_anomaly": (
+                        "high"
+                        if zscore_last is not None and abs(zscore_last) >= 3
+                        else "moderate"
+                        if zscore_last is not None and abs(zscore_last) >= 2
+                        else "normal"
+                        if zscore_last is not None
+                        else "insufficient_data"
+                    ),
                     "delta": rounded_history_value(values[-1] - values[0]),
                     "value": rounded_history_value(selected),
+                    "value_semantics": (
+                        "units_per_day" if aggregation == "trend"
+                        else "dimensionless_zscore" if aggregation == "zscore"
+                        else aggregation
+                    ),
                 }
                 if group_by == "day":
                     day = dt.date.fromisoformat(key)

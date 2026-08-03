@@ -13,6 +13,7 @@ Comandos dentro del terminal:
   /sensores             Lista observaciones recientes
   /aprender <texto>     Guarda una memoria manual
   /consultalo <texto>   Prepara una nota para que Codex revise/corrija Codexon
+  /codex <texto>        Abre Codex para enseñar o modificar Codexon
   /estado               Muestra modelo, MCP y tareas activas
   /salir                Cierra el agente
 """
@@ -1264,6 +1265,7 @@ def extract_json_object(raw: str) -> dict[str, Any]:
 @dataclasses.dataclass(frozen=True)
 class SemanticStatisticalPlan:
     metric: str
+    semantic_query: str
     aggregation: str
     scope: str
     period_status: str
@@ -1290,7 +1292,8 @@ def parse_semantic_statistical_plan(raw: str) -> SemanticStatisticalPlan | None:
     period_status = str(payload.get("period_status") or "missing").strip().lower()
     period_text = str(payload.get("period_text") or "").strip()
     if not metric or not aggregation or aggregation not in {
-        "maximum", "minimum", "average", "sum", "range", "count", "comparison"
+        "maximum", "minimum", "average", "median", "standard_deviation",
+        "trend", "anomaly", "sum", "range", "count", "comparison"
     }:
         return None
     if period_status not in {"explicit", "missing"}:
@@ -1308,6 +1311,7 @@ def parse_semantic_statistical_plan(raw: str) -> SemanticStatisticalPlan | None:
         rolling_days = 0
     return SemanticStatisticalPlan(
         metric=metric,
+        semantic_query=str(payload.get("semantic_query") or metric).strip(),
         aggregation=aggregation,
         scope=scope,
         period_status=period_status,
@@ -1422,6 +1426,17 @@ def statistical_answer_period_is_consistent(
     return all(start <= value <= end for value in mentioned)
 
 
+def extract_statistical_escalation(answer: str) -> tuple[str, str | None]:
+    pattern = re.compile(
+        r"(?im)^\s*(?:[-*]\s*)?ESCALATE_STATISTICS\s*:\s*(?P<reason>.+?)\s*$"
+    )
+    match = pattern.search(answer or "")
+    if match is None:
+        return (answer or "").strip(), None
+    cleaned = pattern.sub("", answer or "").strip()
+    return cleaned, match.group("reason").strip()
+
+
 def estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     chars = 0
     for message in messages:
@@ -1450,6 +1465,21 @@ class ModelSelection:
     reason: str
     estimated_cost_usd: float | None
     fallbacks: list[str]
+
+
+MODEL_PREFERENCE_SETTING_BY_TASK = {
+    "classification": "classification_model",
+    "statistical_planning": "statistical_planning_model",
+    "statistical_reasoning": "statistical_reasoning_model",
+}
+
+ECONOMY_MODEL = "google/gemini-2.5-flash-lite"
+BUDGET_STAGE_DEFAULTS = {
+    "classification": (450, 180, 1),
+    "statistical_planning": (550, 220, 1),
+    "homeassistant": (22000, 600, 2),
+    "memory_extraction": (450, 320, 1),
+}
 
 
 class ModelRouter:
@@ -2305,6 +2335,40 @@ class MemoryStore:
         )
         return {"total": dict(total), "recent": [dict(row) for row in recent]}
 
+    def estimate_usage_call(
+        self,
+        *,
+        context: str,
+        model: str,
+        default_prompt_tokens: int,
+        default_completion_tokens: int,
+    ) -> dict[str, Any]:
+        row = self.conn.execute(
+            """
+            SELECT AVG(prompt_tokens) AS prompt_tokens,
+                   AVG(completion_tokens) AS completion_tokens,
+                   AVG(estimated_cost_usd) AS cost_usd,
+                   COUNT(*) AS samples
+            FROM (
+                SELECT prompt_tokens, completion_tokens, estimated_cost_usd
+                FROM usage_events
+                WHERE context = ? AND model = ?
+                  AND prompt_tokens IS NOT NULL
+                  AND completion_tokens IS NOT NULL
+                ORDER BY id DESC
+                LIMIT 40
+            )
+            """,
+            (context, model),
+        ).fetchone()
+        samples = int(row["samples"] or 0) if row else 0
+        return {
+            "prompt_tokens": int(round(row["prompt_tokens"])) if samples else default_prompt_tokens,
+            "completion_tokens": int(round(row["completion_tokens"])) if samples else default_completion_tokens,
+            "cost_usd": float(row["cost_usd"]) if samples and row["cost_usd"] is not None else None,
+            "samples": samples,
+        }
+
     def recent_memories(self, limit: int = 12) -> list[sqlite3.Row]:
         return list(
             self.conn.execute(
@@ -2341,7 +2405,7 @@ class MemoryStore:
             if score:
                 scored.append((score, row))
         scored.sort(key=lambda item: item[0], reverse=True)
-        return [row for _, row in scored[:limit]] or self.recent_memories(limit)
+        return [row for _, row in scored[:limit]]
 
     def recent_observations(self, limit: int = 8) -> list[sqlite3.Row]:
         return list(
@@ -3192,6 +3256,7 @@ class CodexonAgent:
         self.preferred_model = self.memory.get_setting("interactive_model") or None
         self.model_test_question = self.memory.get_setting("model_test_question")
         self.request_preferred_model: str | None = None
+        self.request_budget_mode: str | None = None
         self.last_interactive_model_used: str | None = None
         self.messages: list[dict[str, Any]] = []
         self.tool_name_map: dict[str, str] = {}
@@ -3810,11 +3875,12 @@ class CodexonAgent:
         return converted
 
     def _system_prompt(self, user_text: str | None = None) -> str:
-        memories = self.memory.search_memories(user_text or "", limit=10)
-        entity_catalog = self.memory.search_entity_catalog(user_text or "", limit=8)
-        entity_resolutions = self.memory.recent_entity_resolutions(user_text or "", limit=8)
-        observations = self.memory.recent_observations(limit=6)
-        pending_tasks = self.memory.list_tasks(include_done=False, limit=8)
+        economical = getattr(self, "request_budget_mode", None) == "economy"
+        memories = self.memory.search_memories(user_text or "", limit=4 if economical else 10)
+        entity_catalog = self.memory.search_entity_catalog(user_text or "", limit=5 if economical else 8)
+        entity_resolutions = self.memory.recent_entity_resolutions(user_text or "", limit=4 if economical else 8)
+        observations = self.memory.recent_observations(limit=3 if economical else 6)
+        pending_tasks = self.memory.list_tasks(include_done=False, limit=4 if economical else 8)
 
         memory_block = "\n".join(
             f"- [{m['kind']}/{m['topic']}] {m['content']} (confianza {m['confidence']:.2f})"
@@ -3930,8 +3996,29 @@ Tareas pendientes:
         ignore_request_preference: bool = False,
     ) -> Any:
         route = (self.router.config.get("routes") or {}).get(task) or {}
-        effective_preferred_model = preferred_model or (
-            None if ignore_request_preference else self.request_preferred_model
+        selected_setting = MODEL_PREFERENCE_SETTING_BY_TASK.get(
+            task, "interactive_model"
+        )
+        get_setting = getattr(self.memory, "get_setting", None)
+        persisted_preference = (
+            get_setting(selected_setting) or None
+            if callable(get_setting)
+            else None
+        ) if not ignore_request_preference else None
+        economy_preference = (
+            ECONOMY_MODEL
+            if getattr(self, "request_budget_mode", None) == "economy"
+            else None
+        )
+        effective_preferred_model = economy_preference or preferred_model or (
+            persisted_preference
+            or (
+                self.request_preferred_model
+                if selected_setting == "interactive_model"
+                else None
+            )
+            if not ignore_request_preference
+            else None
         )
         effective_priority = str(route.get("priority") or priority)
         selection = self.router.select(
@@ -3985,9 +4072,103 @@ Tareas pendientes:
             raise last_exc
         raise RuntimeError("ModelRouter no devolvió modelos candidatos")
 
+    def selected_model_for_task(self, task: str, *, economy: bool = False) -> str:
+        if economy:
+            return ECONOMY_MODEL
+        setting = MODEL_PREFERENCE_SETTING_BY_TASK.get(task, "interactive_model")
+        selected = self.memory.get_setting(setting) or None
+        route = (self.router.config.get("routes") or {}).get(task) or {}
+        return str(selected or route.get("model") or self.router.config.get("default") or FALLBACK_MODEL)
+
+    def estimate_request_budget(self, user_text: str, *, economy: bool = False) -> dict[str, Any]:
+        labels = {
+            "classification": "Clasificar la peticion",
+            "statistical_planning": "Preparar plan estadistico (solo si aplica)",
+            "homeassistant": "Resolver herramientas y redactar/verificar",
+            "memory_extraction": "Guardar memoria relevante",
+        }
+        stages: list[dict[str, Any]] = []
+        total_usd = 0.0
+        unknown_cost = False
+        for task, (default_input, default_output, calls) in BUDGET_STAGE_DEFAULTS.items():
+            if economy and task == "homeassistant":
+                default_input = 12000
+                default_output = 450
+            model = self.selected_model_for_task(task, economy=economy)
+            usage = self.memory.estimate_usage_call(
+                context=task,
+                model=model,
+                default_prompt_tokens=default_input,
+                default_completion_tokens=default_output,
+            )
+            per_call = usage["cost_usd"]
+            if per_call is None:
+                per_call = self.router.estimate_cost(
+                    model,
+                    int(usage["prompt_tokens"]),
+                    int(usage["completion_tokens"]),
+                )
+            stage_cost = per_call * calls if per_call is not None else None
+            if stage_cost is None:
+                unknown_cost = True
+            else:
+                total_usd += stage_cost
+            stages.append(
+                {
+                    "task": task,
+                    "label": labels[task],
+                    "model": model,
+                    "calls": calls,
+                    "estimated_cost_usd": stage_cost,
+                    "historical_samples": usage["samples"],
+                    "conditional": task == "statistical_planning",
+                }
+            )
+        return {
+            "request": user_text,
+            "mode": "economy" if economy else "normal",
+            "stages": stages,
+            "estimated_cost_usd": None if unknown_cost else total_usd,
+            "estimated_cost_cents_usd": None if unknown_cost else total_usd * 100,
+            "threshold_cents_usd": 0.2,
+            "within_threshold": None if unknown_cost else total_usd * 100 < 0.2,
+            "estimation": "recent_usage_average_then_catalog_price",
+        }
+
+    def total_usage_cost_usd(self) -> float:
+        return float(self.memory.usage_summary(limit=0)["total"]["cost"] or 0.0)
+
+    async def semantic_request_kind(self, user_text: str) -> str:
+        response = await self._chat(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Clasifica la peticion sin resolverla. Devuelve solo JSON: "
+                        "{\"kind\":\"statistical\"} si exige calcular maximo, minimo, "
+                        "media, mediana, desviacion, tendencia, anomalia, suma, recuento "
+                        "o comparacion historica; en cualquier otro caso devuelve "
+                        "{\"kind\":\"other\"}. Una condicion futura con umbral no es "
+                        "estadistica."
+                    ),
+                },
+                {"role": "user", "content": user_text},
+            ],
+            tools=False,
+            task="classification",
+        )
+        with contextlib.suppress(Exception):
+            return str(
+                extract_json_object(response.choices[0].message.content or "").get("kind")
+                or "other"
+            ).strip().lower()
+        return "other"
+
     async def semantic_statistical_plan(
         self, user_text: str
     ) -> SemanticStatisticalPlan | None:
+        if await self.semantic_request_kind(user_text) != "statistical":
+            return None
         now = local_now().isoformat(timespec="seconds")
         response = await self._chat(
             [
@@ -3996,12 +4177,14 @@ Tareas pendientes:
                     "content": (
                         "Clasifica semanticamente la peticion, sin depender de palabras exactas. "
                         "Una consulta estadistica pide calcular maximo, minimo, media, suma, rango, "
-                        "recuento o comparacion sobre estados/eventos de Home Assistant. Una lectura "
+                        "mediana, desviacion, tendencia, anomalia, recuento o comparacion sobre "
+                        "estados/eventos de Home Assistant. Una lectura "
                         "actual, una accion, una lista de entidades o una pregunta general es other. "
                         "Separa la magnitud medida del dispositivo cuya actividad puede atribuirle el "
                         "consumo. No inventes entity_id. Devuelve exclusivamente JSON con: "
                         "kind (statistical|other), metric, aggregation "
-                        "(maximum|minimum|average|sum|range|count|comparison), scope, "
+                        "(maximum|minimum|average|median|standard_deviation|trend|anomaly|sum|range|count|comparison), scope, "
+                        "semantic_query en español con magnitud y zona pero sin verbos estadisticos, "
                         "period_status (explicit|missing), period_text, period_kind "
                         "(missing|today|yesterday|current_week|previous_week|current_month|"
                         "previous_month|rolling_days|explicit_dates|all_history), start_time, "
@@ -4015,12 +4198,167 @@ Tareas pendientes:
                 {"role": "user", "content": user_text},
             ],
             tools=False,
-            task="classification",
-            ignore_request_preference=True,
+            task="statistical_planning",
         )
         return parse_semantic_statistical_plan(
             response.choices[0].message.content or ""
         )
+
+    def sensor_architecture_context(
+        self, plan: SemanticStatisticalPlan
+    ) -> dict[str, Any]:
+        query = plan.semantic_query or " ".join(
+            item for item in (plan.metric, plan.scope) if item
+        )
+        profile_matches: list[tuple[str, dict[str, Any]]] = []
+        seen_roles: set[str] = set()
+        for candidate_query in (query, plan.scope, plan.metric, plan.activity_scope):
+            if not candidate_query:
+                continue
+            with contextlib.suppress(Exception):
+                for role, binding in self.site_profile.search_bindings(candidate_query):
+                    if role not in seen_roles:
+                        profile_matches.append((role, binding))
+                        seen_roles.add(role)
+
+        catalog_rows: list[Any] = []
+        catalog_entities: set[str] = set()
+        for candidate_query in (query, plan.metric, plan.scope, plan.activity_scope):
+            if not candidate_query:
+                continue
+            with contextlib.suppress(Exception):
+                for row in self.memory.search_entity_catalog(
+                    candidate_query, domain="sensor", limit=16
+                ):
+                    entity_id = str(
+                        row.get("entity_id") if isinstance(row, dict) else row["entity_id"]
+                    )
+                    if entity_id and entity_id not in catalog_entities:
+                        catalog_rows.append(row)
+                        catalog_entities.add(entity_id)
+
+        def row_value(row: Any, key: str) -> Any:
+            if isinstance(row, dict):
+                return row.get(key)
+            with contextlib.suppress(Exception):
+                return row[key]
+            return None
+
+        catalog_by_entity = {
+            str(row_value(row, "entity_id") or ""): row
+            for row in catalog_rows
+            if row_value(row, "entity_id")
+        }
+        nodes: list[dict[str, Any]] = []
+        node_ids: set[str] = set()
+        relationships: list[dict[str, Any]] = []
+        functional_groups: dict[str, list[str]] = {}
+        for role, binding in profile_matches:
+            group = role.split(".", 1)[0]
+            functional_groups.setdefault(group, []).append(role)
+            for entity_id in self.site_profile.entities(role):
+                row = catalog_by_entity.get(entity_id)
+                if entity_id not in node_ids:
+                    domain = entity_id.split(".", 1)[0]
+                    nodes.append(
+                        {
+                            "entity_id": entity_id,
+                            "domain": domain,
+                            "capability": (
+                                "measurement" if domain == "sensor" else
+                                "binary_observation" if domain == "binary_sensor" else
+                                "activity_or_control"
+                            ),
+                            "role": role,
+                            "label": binding.get("label"),
+                            "kind": binding.get("kind"),
+                            "area": binding.get("area"),
+                            "aliases": list(binding.get("aliases") or []),
+                            "tags": list(binding.get("tags") or []),
+                            "device_class": row_value(row, "device_class"),
+                            "unit": row_value(row, "unit"),
+                            "friendly_name": row_value(row, "friendly_name"),
+                        }
+                    )
+                    node_ids.add(entity_id)
+                master_role = str(binding.get("master_role") or "").strip()
+                if master_role:
+                    relationships.append(
+                        {"type": "controlled_by_role", "from_role": role, "to_role": master_role}
+                    )
+                controller = binding.get("controller")
+                if controller:
+                    relationships.append(
+                        {"type": "controller_metadata", "role": role, "value": controller}
+                    )
+
+        for row in catalog_rows:
+            entity_id = str(row_value(row, "entity_id") or "")
+            if not entity_id or entity_id in node_ids:
+                continue
+            nodes.append(
+                {
+                    "entity_id": entity_id,
+                    "domain": str(row_value(row, "domain") or "sensor"),
+                    "capability": "measurement",
+                    "role": str(row_value(row, "roles") or ""),
+                    "label": row_value(row, "friendly_name"),
+                    "area": row_value(row, "area_name"),
+                    "device_name": row_value(row, "device_name"),
+                    "device_class": row_value(row, "device_class"),
+                    "unit": row_value(row, "unit"),
+                    "aliases": row_value(row, "aliases"),
+                    "source": "learned_entity_catalog",
+                }
+            )
+            node_ids.add(entity_id)
+
+        for group, roles in functional_groups.items():
+            measurement_roles = [
+                role
+                for role in roles
+                if any(
+                    node.get("role") == role
+                    and node.get("capability") == "measurement"
+                    for node in nodes
+                )
+            ]
+            activity_roles = [
+                role
+                for role in roles
+                if any(
+                    node.get("role") == role
+                    and node.get("capability") == "activity_or_control"
+                    for node in nodes
+                )
+            ]
+            if measurement_roles and activity_roles:
+                relationships.append(
+                    {
+                        "type": "shared_functional_system",
+                        "group": group,
+                        "measurement_roles": measurement_roles,
+                        "activity_roles": activity_roles,
+                    }
+                )
+
+        return {
+            "query": query,
+            "requested_metric": plan.metric,
+            "requested_scope": plan.scope,
+            "needs_activity_attribution": plan.needs_activity_attribution,
+            "activity_scope": plan.activity_scope,
+            "nodes": nodes[:40],
+            "relationships": relationships[:40],
+            "functional_groups": functional_groups,
+            "reasoning_rules": [
+                "measurement nodes provide numeric evidence",
+                "activity_or_control nodes delimit operation but do not measure by themselves",
+                "shared functional groups may connect a controller with a common meter",
+                "prefer explicit profile roles and learned replacements over name similarity",
+                "compare every applicable measurement node before selecting an extreme",
+            ],
+        }
 
     def record_usage(
         self,
@@ -4078,10 +4416,13 @@ Tareas pendientes:
         user_text: str,
         task: str = "homeassistant",
         preferred_model: str | None = None,
+        budget_mode: str | None = None,
     ) -> str:
         async with self.ask_lock:
             previous_preferred = self.request_preferred_model
+            previous_budget_mode = self.request_budget_mode
             self.request_preferred_model = preferred_model
+            self.request_budget_mode = budget_mode
             self.last_interactive_model_used = None
             self.request_effective_user_text = user_text
             self.request_mobile_alert_sent = False
@@ -4111,6 +4452,7 @@ Tareas pendientes:
                 return answer
             finally:
                 self.request_preferred_model = previous_preferred
+                self.request_budget_mode = previous_budget_mode
 
     async def _ask_unlocked(self, user_text: str, *, task: str) -> str:
         conversation_user_text = user_text
@@ -4793,6 +5135,11 @@ Tareas pendientes:
             if statistical_plan is not None
             else None
         )
+        sensor_architecture = (
+            self.sensor_architecture_context(statistical_plan)
+            if statistical_plan is not None
+            else None
+        )
         working_messages = [
             {"role": "system", "content": self._system_prompt(user_text)},
             *(
@@ -4802,6 +5149,8 @@ Tareas pendientes:
                         "content": (
                             "Plan estadistico semantico ya clasificado:\n"
                             f"{compact_json(statistical_plan_context, 4000)}\n"
+                            "Arquitectura local relevante (perfil, catalogo aprendido y relaciones):\n"
+                            f"{compact_json(sensor_architecture, 12000)}\n"
                             "Resuelve las entidades por funciones, roles, device_class, unidad, zona, "
                             "aliases y relaciones aprendidas. Usa ha_search_site_entities para el perfil "
                             "semantico y ha_search_entities para completar el catalogo real. El dispositivo "
@@ -4809,7 +5158,12 @@ Tareas pendientes:
                             "herramienta historica adecuada y responde con valor, unidad, periodo, fuentes "
                             "y cobertura. Para maximo/minimo/media de todo el intervalo usa "
                             "ha_aggregate_numeric_history con group_by=period y aplica la consulta a todos "
-                            "los sensores semanticos coincidentes, no solo al primero."
+                            "los sensores semanticos coincidentes, no solo al primero. Los calculos son "
+                            "responsabilidad de las herramientas Python/HA; interpreta sus campos numericos "
+                            "y no recalcules estadisticas mentalmente. Si la evidencia admite hipotesis "
+                            "incompatibles o la conclusion puede provocar una decision de alto impacto, "
+                            "termina con una linea ESCALATE_STATISTICS: seguida del motivo concreto. No "
+                            "solicites escalado por una consulta rutinaria ni solo por falta de datos."
                         ),
                     }
                 ]
@@ -4851,12 +5205,16 @@ Tareas pendientes:
         statistical_tool_used = False
         statistical_retry_sent = False
         statistical_answer_retry_sent = False
-        statistical_semantic_query = ""
+        statistical_escalated = False
+        statistical_evidence: list[str] = []
+        statistical_semantic_query = (
+            statistical_plan.semantic_query if statistical_plan is not None else ""
+        )
         for _ in range(MAX_TOOL_ROUNDS):
             response = await self._chat(
                 working_messages,
                 tools=True,
-                task=task,
+                task="statistical_reasoning" if statistical_query else task,
                 requires_memory=True,
             )
             msg = response.choices[0].message
@@ -4969,6 +5327,51 @@ Tareas pendientes:
                         }
                     )
                     continue
+                answer, escalation_reason = extract_statistical_escalation(answer)
+                if (
+                    statistical_query
+                    and escalation_reason
+                    and not statistical_escalated
+                ):
+                    statistical_escalated = True
+                    escalation_response = await self._chat(
+                        [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Revisa una interpretacion estadistica excepcional. Los calculos ya "
+                                    "fueron ejecutados por herramientas: no inventes ni recalcules valores. "
+                                    "Contrasta hipotesis, explica la ambiguedad o el impacto y redacta la "
+                                    "respuesta final en español con valor, unidad, periodo, fuentes y "
+                                    "limitaciones. No propongas acciones fisicas no solicitadas."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Pregunta: {user_text}\n"
+                                    f"Plan: {compact_json(statistical_plan_context, 4000)}\n"
+                                    f"Motivo de escalado: {escalation_reason}\n"
+                                    "Evidencia calculada:\n"
+                                    + "\n".join(statistical_evidence[-6:])
+                                    + f"\nPrimera interpretacion: {answer}"
+                                ),
+                            },
+                        ],
+                        tools=False,
+                        task="statistical_escalation",
+                        ignore_request_preference=True,
+                    )
+                    escalated_answer = (
+                        escalation_response.choices[0].message.content or ""
+                    ).strip()
+                    if (
+                        statistical_answer_is_complete(escalated_answer)
+                        and statistical_answer_period_is_consistent(
+                            escalated_answer, statistical_period
+                        )
+                    ):
+                        answer = escalated_answer
                 if inventory_query and not inventory_tool_used:
                     if inventory_retry_sent:
                         answer = (
@@ -5054,13 +5457,16 @@ Tareas pendientes:
                             "maximum": "max",
                             "minimum": "min",
                             "average": "mean",
+                            "median": "median",
+                            "standard_deviation": "stddev",
+                            "trend": "trend",
+                            "anomaly": "zscore",
                         }
                         if statistical_plan and statistical_plan.aggregation in aggregation_names:
                             tool_args["aggregation"] = aggregation_names[
                                 statistical_plan.aggregation
                             ]
-                        if statistical_semantic_query:
-                            tool_args.pop("entity_id", None)
+                        if statistical_semantic_query and not tool_args.get("entity_id"):
                             tool_args["query"] = statistical_semantic_query
 
                 if (
@@ -5171,6 +5577,7 @@ Tareas pendientes:
                     and not content_text.startswith("ERROR")
                 ):
                     statistical_tool_used = True
+                    statistical_evidence.append(content_text[:16000])
                 if (
                     statistical_query
                     and real_name == "__builtin__:ha_search_site_entities"
@@ -6441,25 +6848,39 @@ Tareas pendientes:
             return None
 
         entity_id, label = resolved
+        if "." not in entity_id:
+            return None
+        entity_domain = entity_id.split(".", 1)[0]
         service = "turn_on" if turn_on else "turn_off"
         expected_state = "on" if turn_on else "off"
-        await self.call_builtin_tool(
+        action_text = await self.call_builtin_tool(
             "__builtin__:ha_call_service",
             {
-                "domain": "switch",
+                "domain": entity_domain,
                 "service": service,
                 "target": {"entity_id": entity_id},
                 "confirm": True,
             },
         )
+        try:
+            action_result = json.loads(action_text)
+        except json.JSONDecodeError:
+            action_result = {}
         observed_state = json.loads(
             await self.call_builtin_tool("__builtin__:ha_get_state", {"entity_id": entity_id})
         ).get("state")
         if observed_state != expected_state:
             raise RuntimeError(
-                f"No se pudo ejecutar switch.{service} sobre {entity_id}; estado observado: {observed_state}"
+                f"No se pudo ejecutar {entity_domain}.{service} sobre {entity_id}; estado observado: {observed_state}"
             )
-        return f"Ejecutado switch.{service} sobre {label} ({entity_id}); estado final {observed_state}."
+        power_verification = action_result.get("power_verification")
+        if isinstance(power_verification, dict) and not power_verification.get("verified"):
+            raise RuntimeError(
+                f"{entity_domain}.{service} dejó {entity_id} en {observed_state}, pero no se verificó "
+                f"el cambio de potencia: {json.dumps(power_verification, ensure_ascii=False)[:700]}"
+            )
+        power_text = " Potencia verificada." if isinstance(power_verification, dict) else ""
+        return f"Ejecutado {entity_domain}.{service} sobre {label} ({entity_id}); estado final {observed_state}.{power_text}"
 
     async def try_execute_kwh_mobile_alert_task(self, instruction: str) -> str | None:
         prefix = "DETERMINISTIC_KWH_MOBILE_ALERT "
@@ -7585,6 +8006,8 @@ Tareas pendientes:
         indexed_name = real_name.removeprefix("__builtin__:")
         if indexed_name in builtin_tool_names(include_homeassistant=self.has_homeassistant_rest):
             result = await call_indexed_builtin_tool(self, indexed_name, args)
+            if indexed_name == "ha_call_service":
+                self.remember_action_verifications(args)
             if indexed_name == "ha_send_mobile_alert":
                 if self.current_task_id is not None:
                     self.current_task_mobile_alert_sent = True
@@ -7592,6 +8015,60 @@ Tareas pendientes:
                     self.request_mobile_alert_sent = True
             return result
         raise ValueError(f"Herramienta interna desconocida: {real_name}")
+
+    def remember_action_verifications(self, args: dict[str, Any]) -> None:
+        """Queue expected HA states after a successful service call."""
+
+        service = str(args.get("service") or "").strip().lower()
+        domain = str(args.get("domain") or "").strip().lower()
+        expected_by_service = {
+            "turn_on": "on",
+            "turn_off": "off",
+            "lock": "locked",
+            "unlock": "unlocked",
+            "open_cover": "open",
+            "close_cover": "closed",
+            "open": "open",
+            "close": "closed",
+        }
+        expected = expected_by_service.get(service)
+        service_data = args.get("service_data") if isinstance(args.get("service_data"), dict) else {}
+        if service == "select_option":
+            expected = str(service_data.get("option") or "") or None
+        elif service == "set_hvac_mode":
+            expected = str(service_data.get("hvac_mode") or "") or None
+        elif service == "set_value":
+            value = service_data.get("value")
+            expected = str(value) if value is not None else None
+        if expected is None or domain in {"notify", "tts", "script", "automation"}:
+            return
+
+        target = args.get("target")
+        entity_ids: Any = target.get("entity_id") if isinstance(target, dict) else args.get("entity_id")
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+        if not isinstance(entity_ids, list):
+            return
+        try:
+            pending = json.loads(self.memory.get_setting("agents.pending_verifications", "[]") or "[]")
+        except json.JSONDecodeError:
+            pending = []
+        pending = [item for item in pending if isinstance(item, dict)]
+        for entity in entity_ids:
+            entity_id = str(entity or "").strip()
+            if "." not in entity_id:
+                continue
+            pending = [item for item in pending if item.get("entity_id") != entity_id]
+            pending.append(
+                {
+                    "entity_id": entity_id,
+                    "expected_state": expected,
+                    "domain": domain,
+                    "service": service,
+                    "requested_at": utc_now(),
+                }
+            )
+        self.memory.set_setting("agents.pending_verifications", json.dumps(pending[-100:], ensure_ascii=False))
 
     async def create_event_listener(self, args: dict[str, Any]) -> str:
         listener_id = create_subscription(
@@ -7923,12 +8400,13 @@ Asistente: {answer}
         data: dict[str, Any] = {}
         last_error: Exception | None = None
         last_raw = ""
+        interactive_model = self.memory.get_setting("interactive_model") or None
         free_interactive_model = False
-        if self.preferred_model:
-            prices = self.router.price_tuple(self.preferred_model)
+        if interactive_model:
+            prices = self.router.price_tuple(interactive_model)
             free_interactive_model = prices == (0.0, 0.0)
         memory_models: tuple[str | None, ...] = (
-            (self.preferred_model,)
+            (interactive_model,)
             if free_interactive_model
             else (None, "openai/gpt-4.1-nano")
         )
@@ -8092,6 +8570,51 @@ def create_teaching_note(instruction: str) -> None:
         print(result.stderr.strip())
     if result.returncode != 0:
         print(f"codexon-teach termino con codigo {result.returncode}.")
+
+
+def codex_maintenance_prompt(instruction: str) -> str:
+    return textwrap.dedent(
+        f"""
+        Trabaja como mantenedor de Codexon a partir de esta petición del usuario:
+
+        {instruction.strip()}
+
+        Revisa primero /data/codexon/teach/latest.md y el contexto vivo disponible.
+        Inspecciona el comportamiento existente antes de cambiarlo. Si la petición es ambigua,
+        pregunta al usuario dentro de esta sesión de Codex. Si requiere código, modifica la fuente
+        canónica del workspace cuando exista y sincroniza la copia activa /data/codexon/app solo
+        después de verificarla. Conserva datos sensibles, memoria y sesiones. Ejecuta pruebas
+        proporcionales al cambio, no publiques en GitHub salvo petición explícita y explica el resultado.
+        """
+    ).strip()
+
+
+def run_codex_maintenance(instruction: str) -> bool:
+    instruction = instruction.strip()
+    if not instruction:
+        print("Uso: /codex <qué quieres enseñar, corregir o modificar>")
+        return False
+    create_teaching_note(instruction)
+    workspace = Path(os.getenv("CODEXON_WORKSPACE") or os.getenv("WORKSPACE") or "/ha_config")
+    if not workspace.exists():
+        workspace = Path("/data/codexon/app")
+    command = [
+        "codex",
+        "--model",
+        os.getenv("CODEX_MODEL", "gpt-5.3-codex"),
+        codex_maintenance_prompt(instruction),
+    ]
+    print("\nAbriendo Codex de mantenimiento. Al salir volverás a codexon-chat.\n", flush=True)
+    try:
+        result = subprocess.run(command, cwd=workspace, check=False)
+    except FileNotFoundError:
+        print("No encuentro el ejecutable codex. Revisa la instalación o autenticación del add-on.")
+        return False
+    if result.returncode != 0:
+        print(f"Codex terminó con código {result.returncode}.")
+        return False
+    print("\nSesión Codex terminada; vuelves a codexon-chat.")
+    return True
 
 
 def setup_console_history() -> None:
@@ -8338,6 +8861,7 @@ def print_help() -> None:
               /sensores               Ver observaciones recientes
               /aprender <texto>       Guardar una memoria manual
               /consultalo [problema]  Crear una nota para que Codex revise/corrija Codexon
+              /codex <petición>       Abrir Codex para enseñar o modificar Codexon
               /tareas                 Ver tareas pendientes
               /tareas --todo          Ver tambien tareas completadas/canceladas
               /cancelar <id>          Cancelar tarea
@@ -8360,6 +8884,7 @@ def print_help() -> None:
             Tambien puedes pedir en lenguaje natural: leer sensores, consultar historico,
             encender/apagar dispositivos, programar tareas, escribir ficheros o buscar en web.
             Si dices "consultalo: <problema>", Codexon preparara el caso para Codex.
+            Con /codex <petición>, Codex se abre de forma interactiva y al salir vuelves al chat.
             """
         ).strip()
     )
@@ -8757,6 +9282,10 @@ async def terminal_loop(
             print("Memoria guardada.")
             continue
 
+        if command == "/codex":
+            run_codex_maintenance(rest)
+            continue
+
         consultalo_instruction = parse_consultalo_request(user_text, command, rest)
         if consultalo_instruction is not None:
             create_teaching_note(consultalo_instruction)
@@ -8918,6 +9447,14 @@ async def run_agent_session(
     else:
         print("Codexon servicio 24/7 activo: prompt interactivo desactivado.")
         tasks.append(asyncio.create_task(task_loop(agent, stop)))
+        tasks.append(
+            asyncio.create_task(
+                agent_manager.run_configured(
+                    stop,
+                    Path(os.getenv("CODEXON_AGENT_CONFIG", "/data/codexon/agent_config.json")),
+                )
+            )
+        )
         if config.ha_base_url and config.ha_token:
             tasks.append(
                 asyncio.create_task(EventEngine(agent, runtime_log=runtime_log).run(stop))

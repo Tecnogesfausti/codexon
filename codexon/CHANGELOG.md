@@ -2,6 +2,33 @@
 
 ## 0.3.4
 
+- `codexon-chat` incorpora `/codex <petición>`: registra el caso, abre Codex interactivamente para enseñar o modificar el agente y vuelve al chat al cerrar la sesión de mantenimiento.
+- El prompt de mantenimiento conserva la petición original, revisa la nota y el contexto vivo, prioriza la fuente canónica, exige pruebas y no publica en GitHub sin una orden explícita.
+- Las tareas simples ya derivan el dominio de servicio del `entity_id`: un `input_boolean.*` no se convierte erróneamente en `switch.turn_on/turn_off`.
+- El control del AC Brokton exige además una verificación de potencia satisfactoria cuando `ha_call_service` devuelve ese resultado; cambiar solo el estado lógico no se considera éxito suficiente.
+- La pestaña Agentes carga su inventario de forma independiente y explica para cada agente su finalidad, entradas, salida e historial persistente.
+- Incorporados seis especialistas de solo lectura para presencia/seguridad, agua/riego, confort climático, estado técnico, verificación de acciones y aprendizaje del hogar.
+- Todos producen el contrato común `codexon.agent_finding.v1`, con evidencia, confianza, entidades, fuentes externas, urgencia, caducidad y recomendación para la IA principal.
+- Los hallazgos idénticos se deduplican mediante una firma persistente; los ciclos frecuentes no llenan la memoria con la misma conclusión.
+- El núcleo relee `agent_config.json` y programa únicamente los especialistas activados desde la web; permanecen pausados por defecto y no realizan acciones físicas ni llamadas LLM.
+- Las llamadas satisfactorias a servicios HA registran el estado esperado para que el especialista verificador compruebe después el resultado real.
+- Los cinco monitores experimentales anteriores se conservan por compatibilidad, pero quedan retirados del inventario principal del panel.
+- La pestaña Tareas carga su API de forma independiente con hasta 200 filas y muestra recuento o error propio; un fallo en cualquier otro panel ya no deja su tabla vacia.
+- El portal e APIs envian cabeceras `no-store` para impedir que Ingress o Android reutilicen JavaScript obsoleto tras una actualizacion.
+- El sufijo `$` en una palabra magica de WhatsApp (`casa$ ...`) activa un presupuesto previo sin llamadas LLM, con desglose por etapa/modelo, coste estimado en centimos USD y confirmacion `vamos`, `mas barato` o `cancelar`.
+- Los presupuestos pendientes se guardan por chat y sobreviven a reinicios; la confirmacion no necesita repetir la palabra magica y la respuesta ejecutada muestra coste real frente al estimado.
+- El modo economico reduce memoria, catalogo, resoluciones, observaciones y tareas recuperadas, y fuerza Gemini Flash-Lite en todas las etapas del encargo.
+- Gemini Flash-Lite clasifica primero si una peticion es estadistica; GPT-4.1 Mini solo prepara el plan cuando la clasificacion lo justifica.
+- Las estimaciones aprenden de hasta 40 llamadas reales recientes por etapa y modelo, usando precios del catalogo como respaldo y un umbral visible de 0,2 centimos USD.
+- La distribucion automatica usa DeepSeek V4 Flash para conversacion, Home Assistant e interpretacion estadistica normal; Gemini Flash-Lite clasifica y GPT-4.1 Mini prepara los planes estructurados.
+- GPT-4.1 deja de ejecutarse en toda consulta estadistica: queda como escalado interno excepcional cuando la primera interpretacion declara evidencia incompatible o una conclusion de alto impacto.
+- El agregador historico calcula ahora en Python media, mediana, desviacion poblacional, tendencia lineal por dia, z-score y nivel de anomalia; los modelos interpretan resultados estructurados y no realizan las cuentas importantes.
+- La recuperacion de memoria ya no rellena el contexto con recuerdos recientes no relacionados cuando una busqueda semantica no obtiene coincidencias.
+- La pagina Modelos permite asignar independientemente cada modelo a cuatro perfiles: conversacion/HA/memoria, clasificacion, planificacion estadistica y razonamiento estadistico; cada perfil puede volver por separado al router automatico.
+- Las preferencias de modelo se leen de forma persistente en cada llamada, por lo que los cambios hechos en la web surten efecto sin reiniciar y un perfil no contamina a los demas.
+- Las consultas historicas construyen ahora un mapa de arquitectura relevante con sensores, actuadores, zonas, roles, unidades, aliases, controladores y relaciones aprendidas antes de elegir fuentes.
+- Los medidores y actuadores del mismo sistema funcional se relacionan semanticamente, permitiendo deducir contadores compartidos sin reglas ligadas a frases o `entity_id` concretos.
+- La planificacion y el razonamiento estadistico usan rutas de modelo orientadas a calidad; el modelo compara todas las fuentes aplicables y conserva las entidades concretas que haya deducido.
 - Una invocacion fallida o sin total de `ha_measure_numeric_during_state` ya no satisface una consulta de consumo historico.
 - Si el modelo omite el total obtenido y vuelve a responder solo con la entidad, Codexon le pide reinterpretar el resultado real y redactar de nuevo la respuesta con total, unidad, periodo y cobertura; no usa una plantilla de respuesta determinista.
 - Reconocidas tambien las formas flexionadas como `litros consumidos`, `gastados`, `usados` o `registrados` en consultas atribuidas a un dispositivo.

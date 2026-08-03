@@ -19,13 +19,16 @@ priorities:
 
 routes:
   chat:
-    model: openai/gpt-4.1-nano
-    reason: Conversacion general barata y estable.
+    model: deepseek/deepseek-v4-flash-0731
+    reason: Conversacion general, contexto recuperado y baja latencia.
 
   homeassistant:
-    model: openai/gpt-4.1-nano
+    model: deepseek/deepseek-v4-flash-0731
     requires_tools: true
-    reason: Buen seguimiento de herramientas para Home Assistant con coste bajo.
+    fallbacks:
+      - openai/gpt-4.1-mini
+      - openai/gpt-4.1-nano
+    reason: Interpretacion de sensores y seguimiento de herramientas con coste bajo.
 
   scheduled_task:
     model: openai/gpt-4.1
@@ -47,6 +50,31 @@ routes:
   classification:
     model: google/gemini-2.5-flash-lite
     reason: Clasificacion barata.
+
+  statistical_planning:
+    model: openai/gpt-4.1-mini
+    priority: quality
+    fallbacks:
+      - openai/gpt-4.1-nano
+      - google/gemini-2.5-flash-lite
+    reason: Separa magnitud, alcance, periodo y atribucion sin depender de frases fijas.
+
+  statistical_reasoning:
+    model: deepseek/deepseek-v4-flash-0731
+    priority: quality
+    requires_tools: true
+    fallbacks:
+      - openai/gpt-4.1-mini
+      - openai/gpt-4.1-nano
+    reason: Interpreta resultados calculados por herramientas y deduce relaciones con baja latencia y coste.
+
+  statistical_escalation:
+    model: openai/gpt-4.1
+    priority: quality
+    fallbacks:
+      - openai/gpt-4.1-mini
+      - deepseek/deepseek-v4-flash-0731
+    reason: Revision excepcional de evidencia ambigua o conclusiones estadisticas de alto impacto.
 
   translation:
     model: qwen/qwen3-32b

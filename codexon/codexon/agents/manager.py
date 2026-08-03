@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import importlib.util
 import inspect
+import json
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -51,7 +52,7 @@ class AgentManager:
         self.agents_dir.mkdir(parents=True, exist_ok=True)
         self.load_errors.clear()
         for path in sorted(self.agents_dir.glob("*.py")):
-            if path.name in {"__init__.py", "base.py", "manager.py"}:
+            if path.name in {"__init__.py", "base.py", "manager.py"} or path.name.startswith("_"):
                 continue
             try:
                 self._load_module(path)
@@ -167,6 +168,34 @@ class AgentManager:
 
     def active_agents(self) -> list[str]:
         return [name for name, managed in self.agents.items() if managed.active]
+
+    async def run_configured(self, stop: asyncio.Event, config_path: Path, *, poll_seconds: float = 5.0) -> None:
+        """Run enabled agents periodically, re-reading configuration without restart."""
+
+        last_runs: dict[str, float] = {}
+        while not stop.is_set():
+            try:
+                payload = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+            except (OSError, json.JSONDecodeError):
+                payload = {}
+            configured = payload.get("agents") if isinstance(payload, dict) else {}
+            configured = configured if isinstance(configured, dict) else {}
+            now = time.monotonic()
+            for name, managed in self.agents.items():
+                overrides = configured.get(name) if isinstance(configured.get(name), dict) else {}
+                enabled = bool(overrides.get("enabled", False))
+                managed.active = enabled
+                if not enabled:
+                    continue
+                frequency = max(1, int(overrides.get("frequency_seconds", managed.agent.frequency_seconds)))
+                if now - last_runs.get(name, float("-inf")) < frequency:
+                    continue
+                last_runs[name] = now
+                await self.run_once(name)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=max(0.25, poll_seconds))
+            except TimeoutError:
+                pass
 
     def _now(self) -> str:
         return self._datetime_now().isoformat(timespec="seconds")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
@@ -13,10 +14,13 @@ class SchedulerWebApiTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.previous_db_path = codexon_web.DB_PATH
+        self.previous_agents_dir = codexon_web.AGENTS_DIR
         codexon_web.DB_PATH = Path(self.tempdir.name) / "web-scheduler.sqlite3"
+        codexon_web.AGENTS_DIR = Path(__file__).resolve().parents[1] / "agents"
 
     def tearDown(self) -> None:
         codexon_web.DB_PATH = self.previous_db_path
+        codexon_web.AGENTS_DIR = self.previous_agents_dir
         self.tempdir.cleanup()
 
     def test_create_task_validates_and_marks_physical_action_manual(self) -> None:
@@ -141,6 +145,57 @@ class SchedulerWebApiTest(unittest.TestCase):
         self.assertIn('class="listener-select"', dashboard)
         self.assertIn("deleteSelectedTasks", dashboard)
         self.assertIn("deleteSelectedListeners", dashboard)
+        self.assertIn("function loadTasks()", dashboard)
+        self.assertIn("/api/tasks?limit=200&include_done=true", dashboard)
+        self.assertIn('id="taskSummary"', dashboard)
+
+    def test_dashboard_offers_four_independent_model_targets(self) -> None:
+        dashboard = codexon_web.index()
+        self.assertIn("Conversacion, HA y memoria", dashboard)
+        self.assertIn("classification", dashboard)
+        self.assertIn("statistical_planning", dashboard)
+        self.assertIn("statistical_reasoning", dashboard)
+        self.assertIn("modelTargetOptions", dashboard)
+
+    def test_web_ha_base_url_accepts_addon_ha_url_without_duplicate_api(self) -> None:
+        with patch.dict("os.environ", {"HA_URL": "http://homeassistant:8123/api"}, clear=False):
+            with patch.dict("os.environ", {"HOME_ASSISTANT_URL": "", "HA_BASE_URL": ""}, clear=False):
+                self.assertEqual(codexon_web.web_ha_base_url(), "http://homeassistant:8123")
+
+    def test_dashboard_loads_agents_independently_and_explains_scheduler_mode(self) -> None:
+        dashboard = codexon_web.index()
+        self.assertIn("function loadAgents()", dashboard)
+        self.assertIn('id="agentSummary"', dashboard)
+        self.assertIn("El núcleo lo ejecuta periódicamente", dashboard)
+        self.assertIn("Probar ahora", dashboard)
+        self.assertIn("Activar", dashboard)
+
+    def test_agents_api_explains_purpose_and_real_execution_mode(self) -> None:
+        result = codexon_web.api_agents()
+
+        self.assertGreater(len(result["agents"]), 0)
+        for agent in result["agents"]:
+            self.assertTrue(agent["purpose"])
+            self.assertTrue(agent["inputs"])
+            self.assertTrue(agent["output"])
+            self.assertIn(agent["execution_mode"], {"paused", "scheduled"})
+            self.assertFalse(agent["uses_llm"])
+            self.assertIn("observation_count", agent)
+            self.assertIn("last_observation", agent)
+
+    def test_automatic_model_selection_only_clears_requested_target(self) -> None:
+        codexon_web.set_setting("interactive_model", "general/model")
+        codexon_web.set_setting("classification_model", "classifier/model")
+
+        result = __import__("asyncio").run(
+            codexon_web.api_select_model(
+                {"model": "auto", "target": "classification"}
+            )
+        )
+
+        self.assertIsNone(result["selected_model"])
+        self.assertEqual(codexon_web.get_setting("interactive_model"), "general/model")
+        self.assertEqual(codexon_web.get_setting("classification_model"), "")
 
     def test_bulk_delete_tasks_only_removes_selected_tasks_and_runs(self) -> None:
         first = codexon_web.api_create_task(

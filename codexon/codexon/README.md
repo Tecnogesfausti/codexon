@@ -211,7 +211,7 @@ Y el log de uso con modelo elegido, motivo, tokens, duracion y coste con:
 /coste
 ```
 
-## Agentes Especializados - Fase 1
+## Agentes especializados
 
 Los agentes viven en `agents/` y heredan de `agents.base.Agent`.
 
@@ -226,7 +226,7 @@ Comandos:
 /agente run <nombre>
 ```
 
-Fase 1 incluye:
+La arquitectura incluye:
 
 - clase base `Agent`
 - metadatos obligatorios del agente
@@ -235,8 +235,20 @@ Fase 1 incluye:
 - inicio/detencion/reinicio logico
 - ejecucion manual `run`
 - estadisticas y aislamiento de errores
+- contrato comun `codexon.agent_finding.v1`
+- programacion permanente controlada por `CODEXON_AGENT_CONFIG`
+- recarga de activacion e intervalo sin reiniciar
 
-La ejecucion programada automatica de agentes queda para Fase 2.
+Los seis especialistas principales son:
+
+- `especialista_presencia_seguridad`
+- `especialista_agua_riego`
+- `especialista_confort_climatico`
+- `especialista_estado_tecnico`
+- `especialista_verificador_acciones`
+- `especialista_aprendizaje_hogar`
+
+Estan pausados por defecto. La web permite probarlos o activarlos individualmente. Son de solo lectura: guardan evidencia para Codexon, pero no ejecutan acciones fisicas ni llaman a un LLM.
 
 ## Historial De Consola
 
@@ -495,13 +507,19 @@ Con esta combinación, la web queda disponible por Ingress `8099` y las tareas c
 
 La terminal persistente tipo `tmux` queda integrada como herramienta de mantenimiento y desarrollo. No es el motor del scheduler: Codexon ya puede esperar, ejecutar tareas y guardar resultados de forma persistente desde su proceso de servicio.
 
+Dentro de `codexon-chat`, `/codex <petición>` abre una sesión interactiva de mantenimiento. La solicitud queda registrada como enseñanza y Codex puede inspeccionar, modificar y probar el agente. Al cerrar Codex se vuelve al chat. Por ejemplo:
+
+```text
+/codex enséñame a apagar el aire acondicionado cuando suba el precio de la luz
+```
+
 ### Panel web operativo
 
 La UI web permite gestionar Codexon desde el navegador:
 
 - crear tareas con fecha/hora, prioridad e intervalo informativo;
 - ejecutar, cancelar o eliminar tareas;
-- listar agentes, ejecutar un agente manualmente y ajustar prioridad/intervalo efectivo;
+- listar especialistas, probarlos, activarlos o pausarlos y ajustar prioridad/intervalo efectivo;
 - guardar configuracion de agentes en `CODEXON_AGENT_CONFIG`;
 - ver observaciones, resultados, herramientas y logs.
 
@@ -568,3 +586,11 @@ la propia cuenta para evitar bucles. La lista opcional
 de activación se configuran en `CODEXON_WHATSAPP_WAKE_WORDS`, separadas por
 `|` (por ejemplo, `casa|huerto`). No distinguen mayúsculas ni acentos y se
 eliminan antes de entregar la orden a Codexon.
+
+El sufijo `$` activa el gestor de presupuesto antes de cualquier llamada LLM:
+`casa$ cuando haga 25 grados avisa`. La respuesta desglosa etapas, modelos y
+coste estimado. `vamos` ejecuta el plan, `más barato` lo recalcula con contexto
+reducido y Gemini Flash-Lite, y `cancelar` lo descarta. La confirmación pendiente
+se conserva en `/data/codexon/whatsapp/pending-budgets.json` y sobrevive a un
+reinicio. Los importes se expresan en céntimos USD porque OpenRouter publica sus
+tarifas en dólares.
