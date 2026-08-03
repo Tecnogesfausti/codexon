@@ -194,6 +194,14 @@ codexon-chat
 
 `codexon-chat` usa bloqueo para evitar dos sesiones simultáneas y siempre arranca con `--no-sensor-loop`, de modo que no duplica los observadores 24/7 del servicio.
 
+Para enseñar o modificar Codexon desde ese mismo chat:
+
+```text
+/codex enséñame a apagar el aire acondicionado cuando suba el precio de la luz
+```
+
+El comando registra la petición, abre Codex interactivamente y vuelve a `codexon-chat` al salir. Codex revisa la nota generada, inspecciona la fuente canónica y verifica cualquier cambio. No publica en GitHub sin una petición explícita.
+
 
 Al abrir la terminal aparece un banner con los dos caminos principales: `codex --model "$CODEX_MODEL" "$WORKSPACE"` para trabajar sobre código y `codexon-console` para operar el servicio.
 
@@ -272,3 +280,11 @@ la palabra antes de entregar la orden. Los grupos y los mensajes enviados por
 la propia cuenta se aceptan siempre; no necesitan opciones separadas en la
 configuración del add-on. Las palabras de activación siguen aplicándose antes
 de entregar la orden a Codexon.
+
+Para pedir un presupuesto LLM antes de ejecutar, añade `$` inmediatamente a
+la palabra de activación: `casa$ cuando haga 25 grados avisa`. Codexon muestra
+las etapas, modelos y coste estimado en céntimos USD sin llamar antes a ningún
+modelo. El presupuesto queda persistido por chat. Responde `vamos`, `más
+barato` o `cancelar`; no hace falta repetir la palabra de activación. El modo
+económico reduce el contexto recuperado y usa Gemini Flash-Lite. Al terminar se
+muestra el coste real frente al estimado.

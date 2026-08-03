@@ -33,6 +33,43 @@ class DummyAgent:
         return f"respuesta: {user_text}"
 
 
+class BudgetAgent:
+    def __init__(self):
+        self.requests = []
+        self.cost = 1.0
+
+    def estimate_request_budget(self, user_text, *, economy=False):
+        cents = 0.08 if economy else 0.35
+        return {
+            "request": user_text,
+            "mode": "economy" if economy else "normal",
+            "stages": [
+                {
+                    "label": "Clasificar la peticion",
+                    "model": "google/gemini-2.5-flash-lite" if economy else "deepseek/model",
+                    "estimated_cost_usd": cents / 100,
+                    "conditional": False,
+                }
+            ],
+            "estimated_cost_cents_usd": cents,
+            "within_threshold": cents < 0.2,
+        }
+
+    def total_usage_cost_usd(self):
+        return self.cost
+
+    async def ask(
+        self,
+        user_text,
+        task="homeassistant",
+        preferred_model=None,
+        budget_mode=None,
+    ):
+        self.requests.append((user_text, budget_mode))
+        self.cost += 0.0007
+        return "escucha creada"
+
+
 class WhatsAppBridgeTests(unittest.TestCase):
     def test_sender_normalization_and_list(self):
         self.assertEqual(normalize_sender("+34 600 123 123@s.whatsapp.net"), "34600123123")
@@ -132,6 +169,20 @@ class WhatsAppBridgeTests(unittest.TestCase):
         self.assertFalse(bridge._accept_message({**base, "body": "Codexon estado"}))
         self.assertFalse(bridge._accept_message({**base, "body": "casa"}))
 
+    def test_dollar_after_wake_word_requests_budget_preview(self):
+        bridge = WhatsAppBridge(
+            DummyAgent(), config=config(wake_words=("casa",))
+        )
+        event = {
+            "source": "notify",
+            "from": "34600123123@s.whatsapp.net",
+            "body": "casa$ cuando haga 25 grados avisa",
+        }
+
+        self.assertTrue(bridge._accept_message(event))
+        self.assertTrue(event["budget_preview"])
+        self.assertEqual(event["body"], "cuando haga 25 grados avisa")
+
     def test_splits_long_answers(self):
         chunks = split_message(("texto " * 1500).strip(), limit=100)
         self.assertGreater(len(chunks), 1)
@@ -195,6 +246,71 @@ class WhatsAppBridgeTests(unittest.TestCase):
 
 
 class WhatsAppBridgeAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_budget_preview_economy_and_execution_survive_as_separate_messages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            agent = BudgetAgent()
+            bridge = WhatsAppBridge(
+                agent,
+                config=config(
+                    data_dir=Path(directory),
+                    wake_words=("casa",),
+                ),
+            )
+            sent = []
+
+            async def capture(payload):
+                sent.append(payload)
+
+            bridge._send = capture
+
+            preview = {
+                "id": "budget-1",
+                "source": "notify",
+                "from": "34600123123@s.whatsapp.net",
+                "body": "casa$ cuando haga 25 grados avisa",
+            }
+            self.assertTrue(bridge._accept_message(preview))
+            await bridge._messages.put(preview)
+            await bridge._messages.put(None)
+            await bridge._process_messages()
+            self.assertIn("0,35 centimos USD", sent[-1]["message"])
+
+            cheaper = {
+                "id": "budget-2",
+                "source": "notify",
+                "from": "34600123123@s.whatsapp.net",
+                "body": "mas barato",
+            }
+            self.assertTrue(bridge._accept_message(cheaper))
+            await bridge._messages.put(cheaper)
+            await bridge._messages.put(None)
+            await bridge._process_messages()
+            self.assertIn("Opcion economica", sent[-1]["message"])
+            self.assertIn("0,08 centimos USD", sent[-1]["message"])
+
+            restarted = WhatsAppBridge(
+                agent,
+                config=config(
+                    data_dir=Path(directory),
+                    wake_words=("casa",),
+                ),
+            )
+            restarted._send = capture
+            execute = {
+                "id": "budget-3",
+                "source": "notify",
+                "from": "34600123123@s.whatsapp.net",
+                "body": "vamos",
+            }
+            self.assertTrue(restarted._accept_message(execute))
+            await restarted._messages.put(execute)
+            await restarted._messages.put(None)
+            await restarted._process_messages()
+
+            self.assertEqual(agent.requests[-1][1], "economy")
+            self.assertIn("cuando haga 25 grados avisa", agent.requests[-1][0])
+            self.assertIn("Coste LLM real", sent[-1]["message"])
+
     async def test_sends_proactive_message_to_last_sender(self):
         with tempfile.TemporaryDirectory() as directory:
             data_dir = Path(directory)

@@ -98,6 +98,7 @@ Codexon chat completo
 - Usa memoria, OpenRouter, MCP y herramientas del codexon.py real.
 - Arranca siempre con --no-sensor-loop para no duplicar observadores 24/7.
 - Comparte la misma base de datos del servicio: $CODEXON_DB
+- Usa /codex <petición> para enseñar o modificar Codexon y volver después al chat.
 - Para controlar el servicio sin chat completo usa: codexon-console
 
 EOF

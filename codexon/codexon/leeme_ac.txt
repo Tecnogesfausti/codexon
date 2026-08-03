@@ -1,0 +1,64 @@
+DISPOSITIVOS Y ALIAS DEL AIRE ACONDICIONADO
+===========================================
+
+1. Aire acondicionado principal de casa
+   Entidad: climate.brokton_ac
+   Alias: aire acondicionado, aire acondicionado casa, aire de casa, AC,
+   AC casa, clima casa, climatización casa, Brokton, Brokton AC, split casa.
+
+2. Encendido y apagado físico del aire de casa
+   Entidad: input_boolean.brokton_ac_dp1_switch
+   Alias: encender aire, apagar aire, interruptor aire, encendido aire,
+   apagado aire, aire acondicionado, aire acondicionado casa, aire de casa,
+   AC, AC casa, clima casa, Brokton y Brokton AC.
+
+3. Modo ECO del aire de casa
+   Entidad: input_boolean.brokton_ac_dp8_eco
+   Alias: modo ECO aire, eco aire, ahorro aire, modo ahorro aire,
+   ahorro energía aire, bajar potencia aire, reducir consumo aire,
+   modo nocturno aire y modo noche aire.
+
+4. Modo de funcionamiento del aire de casa
+   Entidad: input_select.brokton_ac_dp4_mode
+   Alias: modo aire, modo trabajo aire, frío aire, modo frío, auto aire,
+   modo auto, calor aire, modo calor, seco aire, modo seco,
+   deshumidificar aire, ventilador aire y modo ventilador.
+
+5. Velocidad del ventilador
+   Entidad: input_select.brokton_ac_dp5_fan_speed_enum
+   Nombre actual: Brokton Ac - Velocidad del ventilador
+   No tiene alias aprendidos adicionales.
+
+6. Temperatura objetivo
+   Entidad: input_number.brokton_ac_dp2_temp_set
+   Nombre actual: Brokton Ac - Temperatura objetivo
+   No tiene alias aprendidos adicionales.
+
+7. Temperatura medida por el aire de casa
+   Entidad: sensor.brokton_ac_dp3_temp_current
+   Alias: temperatura casa, temperatura de casa, temperatura interior,
+   temperatura cocina, temperatura de cocina, temperatura comedor,
+   temperatura del comedor, temperatura salón, temperatura del salón,
+   temp cocina, temp comedor, temp salón, clima cocina, clima comedor,
+   clima salón, Brokton temperatura actual, aire cocina temperatura y
+   aire comedor temperatura.
+
+8. Aire acondicionado de la oficina
+   Entidad: climate.oficina_2
+   Nombre actual: Aire Oficina
+   No tiene alias aprendidos adicionales.
+
+MEDIDOR RELACIONADO, PERO NO EXCLUSIVO DEL AIRE
+-----------------------------------------------
+
+Entidad: sensor.powcasa_enchufes_powcasa_enchufes_power
+Función: mide la potencia conjunta de los enchufes de la casa. Codexon puede
+utilizar su variación para comprobar indirectamente el encendido o apagado
+del aire, pero no debe atribuir todo su consumo al aire acondicionado.
+
+NO SON DISPOSITIVOS DE AIRE ACONDICIONADO
+-----------------------------------------
+
+- Los ayudantes ac_dia_*, ac_hora_*, programa_ac_casa y similares son
+  elementos de programación y automatización.
+- Las entidades termodiamante pertenecen al termo de agua caliente.

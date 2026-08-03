@@ -12,6 +12,16 @@ def requested_environment_sensor(user_text: str, site_profile: Any | None = None
     asks_humidity = any(term in folded for term in ("humedad", "humedo", "húmedo"))
     if not asks_temperature and not asks_humidity:
         return None
+    statistical_or_historical = bool(
+        re.search(
+            r"\b(?:maxima|maximo|maximas|maximos|minima|minimo|minimas|minimos|"
+            r"media|promedio|record|rango|historico|historica|ayer|anteayer|semana|"
+            r"mes|ano|fue|era|alcanzo|registro)\b",
+            folded,
+        )
+    )
+    if statistical_or_historical:
+        return None
     if asks_temperature and any(term in folded for term in ("agua", "termo", "calentador", "acumulador")):
         return _profile_sensor(site_profile, "environment.water_temperature", "temperatura del agua", "°C")
     if asks_humidity and any(term in folded for term in ("bano", "baño", "wc", "vater", "váter", "aseo", "termo")):

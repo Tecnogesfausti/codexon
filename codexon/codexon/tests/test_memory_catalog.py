@@ -151,6 +151,23 @@ routes:
         data = extract_json_object('texto previo ```json\n{"memories": []}\n``` texto final')
         self.assertEqual(data, {"memories": []})
 
+    def test_memory_search_does_not_fall_back_to_unrelated_recent_items(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            memory = MemoryStore(Path(tmp) / "memory.sqlite3")
+            try:
+                memory.add_memory(
+                    kind="hecho",
+                    topic="riego",
+                    content="Los bonsais usan el programador secundario.",
+                    confidence=0.9,
+                    source="test",
+                )
+
+                self.assertEqual(memory.search_memories("temperatura dormitorio"), [])
+                self.assertEqual(len(memory.search_memories("bonsais")), 1)
+            finally:
+                memory.close()
+
     def test_entity_catalog_keeps_significant_short_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             memory = MemoryStore(Path(tmp) / "memory.sqlite3")
@@ -385,6 +402,9 @@ class ModelRoutingRuntimeTest(unittest.IsolatedAsyncioTestCase):
                 )
 
         class FakeMemory:
+            def get_setting(self, key: str, default: str = "") -> str:
+                return default
+
             def add_usage_event(self, **kwargs) -> None:
                 self.usage = kwargs
 
@@ -400,6 +420,84 @@ class ModelRoutingRuntimeTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(router.preferred_model, "openrouter/free")
         self.assertEqual(agent.memory.usage["model"], "openrouter/free")
+
+    async def test_each_reasoning_profile_has_an_independent_model(self) -> None:
+        agent = CodexonAgent.__new__(CodexonAgent)
+        agent.request_preferred_model = "general/model"
+        agent.openai_tools = [{"type": "function", "function": {"name": "x", "parameters": {}}}]
+
+        class FakeRouter:
+            config = {"routes": {}}
+
+            def __init__(self) -> None:
+                self.requests = []
+
+            def select(self, request: ModelRequest):
+                self.requests.append(request)
+                return SimpleNamespace(
+                    model=request.preferred_model or "automatic/model",
+                    reason="test",
+                    estimated_cost_usd=0.0,
+                    fallbacks=[],
+                )
+
+            def price_tuple(self, model: str):
+                return (0.0, 0.0)
+
+        class FakeCompletions:
+            async def create(self, **kwargs):
+                return SimpleNamespace(
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                    model_extra={"provider": "test"},
+                )
+
+        class FakeMemory:
+            settings = {
+                "interactive_model": "general/model",
+                "classification_model": "classifier/model",
+                "statistical_planning_model": "planner/model",
+                "statistical_reasoning_model": "reasoner/model",
+            }
+
+            def get_setting(self, key: str, default: str = "") -> str:
+                return self.settings.get(key, default)
+
+            def add_usage_event(self, **kwargs) -> None:
+                pass
+
+            def add_event(self, **kwargs) -> None:
+                raise AssertionError(kwargs)
+
+        router = FakeRouter()
+        agent.router = router
+        agent.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+        agent.memory = FakeMemory()
+
+        for task in (
+            "homeassistant",
+            "classification",
+            "statistical_planning",
+            "statistical_reasoning",
+        ):
+            await agent._chat([{"role": "user", "content": "prueba"}], task=task)
+
+        agent.request_budget_mode = "economy"
+        await agent._chat(
+            [{"role": "user", "content": "prueba economica"}],
+            task="homeassistant",
+        )
+
+        self.assertEqual(
+            [request.preferred_model for request in router.requests],
+            [
+                "general/model",
+                "classifier/model",
+                "planner/model",
+                "reasoner/model",
+                "google/gemini-2.5-flash-lite",
+            ],
+        )
 
 
 if __name__ == "__main__":

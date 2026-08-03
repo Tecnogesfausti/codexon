@@ -105,6 +105,66 @@ class NumericHistoryAggregateTest(unittest.TestCase):
 
         asyncio.run(run())
 
+    def test_period_group_calculates_one_maximum_for_full_interval(self) -> None:
+        async def run() -> None:
+            context = SimpleNamespace(
+                ha_base_url="http://homeassistant:8123",
+                ha_token="token",
+                httpx=FakeHttpx,
+                memory=None,
+                fs_roots=[],
+            )
+            raw = await ha_aggregate_numeric_history(
+                context,
+                {
+                    "entity_id": "sensor.litros_diarios",
+                    "start_time": "2026-07-06T00:00:00+02:00",
+                    "end_time": "2026-07-08T00:00:00+02:00",
+                    "timezone": "Europe/Madrid",
+                    "group_by": "period",
+                    "aggregation": "max",
+                },
+            )
+            result = json.loads(raw)
+            periods = result["results"][0]["periods"]
+
+            self.assertEqual(len(periods), 1)
+            self.assertEqual(periods[0]["period"], "period")
+            self.assertEqual(periods[0]["value"], 250)
+            self.assertEqual(periods[0]["median"], 50)
+            self.assertIn("stddev_population", periods[0])
+            self.assertIn("trend_per_day", periods[0])
+            self.assertIn("last_zscore", periods[0])
+            self.assertIn("last_anomaly", periods[0])
+
+        asyncio.run(run())
+
+    def test_python_selects_median_without_llm_arithmetic(self) -> None:
+        async def run() -> None:
+            context = SimpleNamespace(
+                ha_base_url="http://homeassistant:8123",
+                ha_token="token",
+                httpx=FakeHttpx,
+                memory=None,
+                fs_roots=[],
+            )
+            raw = await ha_aggregate_numeric_history(
+                context,
+                {
+                    "entity_id": "sensor.litros_diarios",
+                    "start_time": "2026-07-06T00:00:00+02:00",
+                    "end_time": "2026-07-08T00:00:00+02:00",
+                    "group_by": "period",
+                    "aggregation": "median",
+                },
+            )
+            period = json.loads(raw)["results"][0]["periods"][0]
+
+            self.assertEqual(period["value"], 50)
+            self.assertEqual(period["value_semantics"], "median")
+
+        asyncio.run(run())
+
     def test_attributes_numeric_consumption_only_while_activity_is_on(self) -> None:
         class StateGatedClient(FakeAsyncClient):
             async def get(self, url: str, headers: dict, params: dict | None = None):
