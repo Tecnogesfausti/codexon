@@ -20,7 +20,7 @@ const STATUS_PATH = path.join(DATA_DIR, 'status.json');
 const QR_TEXT_PATH = path.join(DATA_DIR, 'qr.txt');
 const QR_DATA_URL_PATH = path.join(DATA_DIR, 'qr-data-url.txt');
 const REJECT_CALLS = !['0', 'false', 'no', 'off'].includes(
-  String(process.env.SEGURAI_WHATSAPP_REJECT_CALLS || 'true').toLowerCase()
+  String(process.env.SEGURAI_WHATSAPP_REJECT_CALLS || 'false').toLowerCase()
 );
 const configuredMessageHistory = Number(
   process.env.SEGURAI_WHATSAPP_MESSAGE_HISTORY || 500
@@ -70,7 +70,9 @@ async function startWhatsApp() {
     version,
     auth: state,
     browser: Browsers.macOS('SegurAI'),
-    markOnlineOnConnect: true,
+    // Keep the linked client offline so the phone and other clients retain
+    // their normal presence and push-notification behaviour.
+    markOnlineOnConnect: false,
     syncFullHistory: false,
     logger: baileysLogger
   });

@@ -178,7 +178,9 @@ start_segurai() {
   export SEGURAI_WHATSAPP_ENABLED
   export SEGURAI_WHATSAPP_ALLOWED_SENDERS
   export SEGURAI_WHATSAPP_WAKE_WORDS
-  export SEGURAI_WHATSAPP_REJECT_CALLS=true
+  # Do not intercept or reject incoming WhatsApp audio/video calls.
+  # Messaging remains handled by the Baileys bridge as before.
+  export SEGURAI_WHATSAPP_REJECT_CALLS=false
   export SEGURAI_WHATSAPP_DATA_DIR=/data/segurai/whatsapp
   export SEGURAI_WHATSAPP_BRIDGE=/opt/codex-agent/whatsapp-core/bridge.mjs
 
