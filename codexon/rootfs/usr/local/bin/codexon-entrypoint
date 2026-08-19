@@ -194,7 +194,9 @@ start_codexon() {
   export CODEXON_WHATSAPP_ENABLED
   export CODEXON_WHATSAPP_ALLOWED_SENDERS
   export CODEXON_WHATSAPP_WAKE_WORDS
-  export CODEXON_WHATSAPP_REJECT_CALLS=true
+  # Do not intercept or reject incoming WhatsApp audio/video calls.
+  # Messaging remains handled by the Baileys bridge as before.
+  export CODEXON_WHATSAPP_REJECT_CALLS=false
   export CODEXON_WHATSAPP_DATA_DIR=/data/codexon/whatsapp
   export CODEXON_WHATSAPP_BRIDGE=/opt/codexon/whatsapp-core/bridge.mjs
 
