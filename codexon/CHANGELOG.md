@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- Publica los cambios del puente WhatsApp: no rechaza llamadas y mantiene el cliente vinculado fuera de línea para conservar las notificaciones del teléfono.
+
 ## 0.3.3
 
 - Las preguntas de consumo historico atribuido a un dispositivo deben ejecutar la medicion cruzada entre su actividad y el contador numerico; resolver solamente el `entity_id` ya no se acepta como respuesta.

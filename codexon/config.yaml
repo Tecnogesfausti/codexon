@@ -1,6 +1,6 @@
 name: Codexon
 slug: codexon
-version: "0.3.3"
+version: "0.3.4"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/codexon
 arch:
