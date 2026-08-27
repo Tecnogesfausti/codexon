@@ -80,7 +80,7 @@ routes:
     model: google/gemini-2.5-flash-lite
     priority: quality
     fallbacks:
-      - openrouter/auto
+      - openai/gpt-4.1-mini
     reason: Analisis visual independiente para el portal y las fotos recibidas por WhatsApp.
 
   translation:

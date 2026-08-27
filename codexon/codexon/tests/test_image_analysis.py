@@ -36,6 +36,46 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content[0]["text"], "¿Qué ves?")
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
 
+    async def test_retries_when_model_returns_only_safety_labels(self) -> None:
+        create = AsyncMock(
+            side_effect=[
+                SimpleNamespace(
+                    model="nvidia/safety",
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="User Safety: safe"))],
+                ),
+                SimpleNamespace(
+                    model="vision/fallback",
+                    choices=[SimpleNamespace(message=SimpleNamespace(content="Veo un contador."))],
+                ),
+            ]
+        )
+        client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+        result = await analyze_image(
+            image_bytes=b"jpeg-data",
+            media_type="image/jpeg",
+            question="¿Qué ves?",
+            client=client,
+            model="nvidia/nemotron",
+            fallback_models=("vision/fallback",),
+        )
+
+        self.assertEqual(result, {"answer": "Veo un contador.", "model": "vision/fallback"})
+        self.assertEqual(
+            [call.kwargs["model"] for call in create.await_args_list],
+            ["nvidia/nemotron", "vision/fallback"],
+        )
+
+    def test_image_catalog_excludes_routers_and_safety_models(self) -> None:
+        visual = {"supports_images": True, "supports_chat": True, "name": "Vision"}
+        self.assertTrue(codexon_web.suitable_image_model("vendor/vision", visual))
+        self.assertFalse(codexon_web.suitable_image_model("openrouter/free", visual))
+        self.assertFalse(
+            codexon_web.suitable_image_model(
+                "nvidia/guard", {**visual, "name": "Content safety classifier"}
+            )
+        )
+
     def test_rejects_invalid_type_and_empty_image(self) -> None:
         with self.assertRaises(ValueError):
             validate_image(image_bytes=b"x", media_type="application/pdf")

@@ -68,7 +68,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.7")
+app = FastAPI(title="Codexon", version="0.3.8")
 
 
 @app.middleware("http")
@@ -361,6 +361,17 @@ def model_row(
         "output_price_per_million": output_price,
         "combined_price_per_million": (input_price + output_price) if input_price is not None and output_price is not None else None,
     }
+
+
+def suitable_image_model(model_id: str, metadata: dict[str, Any]) -> bool:
+    folded = normalize_cancellation_key(f"{model_id} {metadata.get('name') or ''}")
+    unsuitable = ("guard", "moderation", "content safety", "safety classifier", "shield")
+    return (
+        model_id not in {"openrouter/free", "openrouter/auto"}
+        and bool(metadata.get("supports_images"))
+        and bool(metadata.get("supports_chat", True))
+        and not any(term in folded for term in unsuitable)
+    )
 
 
 def execute_db(query: str, params: tuple[Any, ...] = ()) -> int:
@@ -870,11 +881,16 @@ async def api_image_analysis(payload: dict[str, Any]) -> dict[str, Any]:
         selected_model = get_setting("image_analysis_model") or str(
             route.get("model") or "openrouter/auto"
         )
+        fallbacks = tuple(str(item) for item in (route.get("fallbacks") or []) if item)
+        route_default = str(route.get("model") or "").strip()
+        if route_default and route_default != selected_model:
+            fallbacks = (route_default, *fallbacks)
         result = await analyze_image(
             image_bytes=image_bytes,
             media_type=media_type,
             question=question,
             model=selected_model,
+            fallback_models=fallbacks,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1445,7 +1461,7 @@ async def api_models(
         or (
             (router.model_catalog.get(model_id) or {}).get("supports_chat", True)
             and (
-                (router.model_catalog.get(model_id) or {}).get("supports_images")
+                suitable_image_model(model_id, router.model_catalog.get(model_id) or {})
                 if target_config.get("requires_images")
                 else (router.model_catalog.get(model_id) or {}).get("supports_tools")
             )
@@ -1515,8 +1531,11 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Modelo no encontrado o no compatible con chat/tools")
     metadata = router.model_catalog.get(requested) or {}
     if metadata and target_config.get("requires_images"):
-        if not metadata.get("supports_images"):
-            raise HTTPException(status_code=400, detail="Ese modelo no admite entrada de imagen")
+        if not suitable_image_model(requested, metadata):
+            raise HTTPException(
+                status_code=400,
+                detail="Elige un modelo visual concreto; los routers variables y modelos de moderacion no son validos",
+            )
     elif metadata and not metadata.get("supports_tools"):
         raise HTTPException(status_code=400, detail="Ese modelo no declara soporte de herramientas")
     set_setting(target_config["setting"], requested)

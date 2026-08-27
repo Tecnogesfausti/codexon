@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.8
+
+- Excluye routers variables y modelos de moderación del selector visual.
+- Detecta respuestas que contienen únicamente etiquetas `User Safety`/`Response Safety`.
+- Reintenta automáticamente con el modelo visual predeterminado cuando el seleccionado no analiza la imagen.
+
 ## 0.3.7
 
 - Mueve el perfil privado de la vivienda a `/addon_config/site.yaml`, persistente entre reconstrucciones.
