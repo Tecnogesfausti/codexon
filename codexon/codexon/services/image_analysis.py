@@ -31,7 +31,6 @@ async def analyze_image(
     question: str,
     client: Any | None = None,
     model: str | None = None,
-    fallback_models: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """Pregunta por una imagen usando el enrutador multimodal de OpenRouter."""
     validate_image(image_bytes=image_bytes, media_type=media_type)
@@ -71,26 +70,19 @@ async def analyze_image(
                 ],
             },
         ]
-    attempted: list[str] = []
-    last_problem = ""
-    for candidate in (selected_model, *fallback_models):
-        candidate = str(candidate or "").strip()
-        if not candidate or candidate in attempted:
-            continue
-        attempted.append(candidate)
-        response = await client.chat.completions.create(
-            model=candidate, messages=messages, temperature=0.2
+    response = await client.chat.completions.create(
+        model=selected_model, messages=messages, temperature=0.2
+    )
+    answer = str(response.choices[0].message.content or "").strip()
+    if not answer:
+        raise RuntimeError(f"{selected_model} no devolvio una respuesta")
+    normalized_lines = {
+        line.strip().casefold() for line in answer.splitlines() if line.strip()
+    }
+    if normalized_lines and normalized_lines <= SAFETY_ONLY_LINES:
+        raise RuntimeError(
+            f"{selected_model} devolvio solo una clasificacion de seguridad; "
+            "selecciona manualmente otro modelo visual"
         )
-        answer = str(response.choices[0].message.content or "").strip()
-        if not answer:
-            last_problem = f"{candidate} no devolvio una respuesta"
-            continue
-        normalized_lines = {
-            line.strip().casefold() for line in answer.splitlines() if line.strip()
-        }
-        if normalized_lines and normalized_lines <= SAFETY_ONLY_LINES:
-            last_problem = f"{candidate} devolvio solo una clasificacion de seguridad"
-            continue
-        used_model = str(getattr(response, "model", "") or candidate)
-        return {"answer": answer, "model": used_model}
-    raise RuntimeError(last_problem or "Ningun modelo visual devolvio una respuesta util")
+    used_model = str(getattr(response, "model", "") or selected_model)
+    return {"answer": answer, "model": used_model}

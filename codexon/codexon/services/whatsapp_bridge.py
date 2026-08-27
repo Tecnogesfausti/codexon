@@ -646,24 +646,31 @@ class WhatsAppBridge:
                             else None
                         )
                         router = getattr(self.agent, "router", None)
-                        route = (
-                            (getattr(router, "config", {}).get("routes") or {}).get("image_analysis")
+                        selected_model = str(selected_model or "").strip()
+                        metadata = (
+                            getattr(router, "model_catalog", {}).get(selected_model) or {}
                             if router is not None else {}
-                        ) or {}
-                        route_default = str(route.get("model") or "").strip()
-                        fallbacks = tuple(
-                            item for item in (
-                                route_default,
-                                *(str(value) for value in (route.get("fallbacks") or [])),
-                            ) if item and item != selected_model
                         )
+                        folded = f"{selected_model} {metadata.get('name') or ''}".casefold()
+                        unsuitable = (
+                            "guard", "moderation", "content safety",
+                            "safety classifier", "shield",
+                        )
+                        if (
+                            not selected_model
+                            or selected_model in {"openrouter/free", "openrouter/auto"}
+                            or (metadata and not metadata.get("supports_images"))
+                            or any(term in folded for term in unsuitable)
+                        ):
+                            raise ValueError(
+                                "Selecciona un modelo concreto en Modelos > Analisis de imagenes"
+                            )
                         result = await analyze_image(
                             image_bytes=base64.b64decode(image_base64, validate=True),
                             media_type=str(event.get("mediaType") or "image/jpeg"),
                             question=body,
                             client=getattr(self.agent, "client", None),
                             model=selected_model,
-                            fallback_models=fallbacks,
                         )
                         answer = result["answer"]
                     else:

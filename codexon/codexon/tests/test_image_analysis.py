@@ -36,35 +36,25 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content[0]["text"], "¿Qué ves?")
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
 
-    async def test_retries_when_model_returns_only_safety_labels(self) -> None:
+    async def test_safety_only_response_does_not_switch_models(self) -> None:
         create = AsyncMock(
-            side_effect=[
-                SimpleNamespace(
-                    model="nvidia/safety",
-                    choices=[SimpleNamespace(message=SimpleNamespace(content="User Safety: safe"))],
-                ),
-                SimpleNamespace(
-                    model="vision/fallback",
-                    choices=[SimpleNamespace(message=SimpleNamespace(content="Veo un contador."))],
-                ),
-            ]
+            return_value=SimpleNamespace(
+                model="nvidia/safety",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="User Safety: safe"))],
+            )
         )
         client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
 
-        result = await analyze_image(
-            image_bytes=b"jpeg-data",
-            media_type="image/jpeg",
-            question="¿Qué ves?",
-            client=client,
-            model="nvidia/nemotron",
-            fallback_models=("vision/fallback",),
-        )
+        with self.assertRaisesRegex(RuntimeError, "selecciona manualmente otro modelo"):
+            await analyze_image(
+                image_bytes=b"jpeg-data",
+                media_type="image/jpeg",
+                question="¿Qué ves?",
+                client=client,
+                model="nvidia/nemotron",
+            )
 
-        self.assertEqual(result, {"answer": "Veo un contador.", "model": "vision/fallback"})
-        self.assertEqual(
-            [call.kwargs["model"] for call in create.await_args_list],
-            ["nvidia/nemotron", "vision/fallback"],
-        )
+        create.assert_awaited_once()
 
     def test_image_catalog_excludes_routers_and_safety_models(self) -> None:
         visual = {"supports_images": True, "supports_chat": True, "name": "Vision"}
@@ -83,7 +73,12 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
             validate_image(image_bytes=b"", media_type="image/png")
 
     async def test_web_endpoint_returns_answer_in_same_request(self) -> None:
-        router = SimpleNamespace(config={"routes": {"image_analysis": {"model": "vision/default"}}})
+        router = SimpleNamespace(
+            config={"routes": {"image_analysis": {"model": "vision/default"}}},
+            model_catalog={
+                "vision/selected": {"supports_images": True, "supports_chat": True}
+            },
+        )
         with (
             patch.object(codexon_web, "get_setting", return_value="vision/selected"),
             patch.object(codexon_web, "build_model_router", AsyncMock(return_value=router)),
@@ -109,3 +104,42 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
                 {"question": "¿Qué es?", "media_type": "image/png", "image_base64": "!!!"}
             )
         self.assertEqual(raised.exception.status_code, 400)
+
+    async def test_visual_profile_rejects_automatic_selection(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            await codexon_web.api_select_model(
+                {"model": "auto", "target": "image_analysis"}
+            )
+        self.assertEqual(raised.exception.status_code, 400)
+
+    async def test_paid_visual_model_requires_explicit_cost_confirmation(self) -> None:
+        router = SimpleNamespace(
+            model_catalog={
+                "vision/paid": {
+                    "supports_images": True,
+                    "supports_chat": True,
+                    "input_price_per_million": 0.2,
+                    "output_price_per_million": 0.8,
+                }
+            }
+        )
+        with (
+            patch.object(codexon_web, "build_model_router", AsyncMock(return_value=router)),
+            patch.object(codexon_web, "set_setting") as setter,
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await codexon_web.api_select_model(
+                    {"model": "vision/paid", "target": "image_analysis"}
+                )
+            self.assertEqual(raised.exception.status_code, 409)
+            setter.assert_not_called()
+
+            result = await codexon_web.api_select_model(
+                {
+                    "model": "vision/paid",
+                    "target": "image_analysis",
+                    "cost_acknowledged": True,
+                }
+            )
+            self.assertEqual(result["selected_model"], "vision/paid")
+            setter.assert_called_once_with("image_analysis_model", "vision/paid")

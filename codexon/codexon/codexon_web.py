@@ -68,7 +68,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.8")
+app = FastAPI(title="Codexon", version="0.3.9")
 
 
 @app.middleware("http")
@@ -338,10 +338,18 @@ def model_row(
     selected_models: dict[str, str | None],
 ) -> dict[str, Any]:
     meta = router.model_catalog.get(model_id) or {}
-    raw_input_price = float(meta.get("input_price_per_million") or 0)
-    raw_output_price = float(meta.get("output_price_per_million") or 0)
-    input_price = raw_input_price if raw_input_price >= 0 else None
-    output_price = raw_output_price if raw_output_price >= 0 else None
+    raw_input_price = meta.get("input_price_per_million")
+    raw_output_price = meta.get("output_price_per_million")
+    input_price = (
+        float(raw_input_price)
+        if raw_input_price is not None and float(raw_input_price) >= 0
+        else None
+    )
+    output_price = (
+        float(raw_output_price)
+        if raw_output_price is not None and float(raw_output_price) >= 0
+        else None
+    )
     return {
         "id": model_id,
         "name": meta.get("name") or model_id,
@@ -360,6 +368,11 @@ def model_row(
         "input_price_per_million": input_price,
         "output_price_per_million": output_price,
         "combined_price_per_million": (input_price + output_price) if input_price is not None and output_price is not None else None,
+        "cost_class": (
+            "unknown"
+            if input_price is None or output_price is None
+            else ("free" if input_price == 0 and output_price == 0 else "paid")
+        ),
     }
 
 
@@ -877,20 +890,21 @@ async def api_image_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
         router = await build_model_router()
-        route = (router.config.get("routes") or {}).get("image_analysis") or {}
-        selected_model = get_setting("image_analysis_model") or str(
-            route.get("model") or "openrouter/auto"
-        )
-        fallbacks = tuple(str(item) for item in (route.get("fallbacks") or []) if item)
-        route_default = str(route.get("model") or "").strip()
-        if route_default and route_default != selected_model:
-            fallbacks = (route_default, *fallbacks)
+        selected_model = str(get_setting("image_analysis_model") or "").strip()
+        metadata = router.model_catalog.get(selected_model) or {}
+        if (
+            not selected_model
+            or selected_model in {"openrouter/free", "openrouter/auto"}
+            or (metadata and not suitable_image_model(selected_model, metadata))
+        ):
+            raise ValueError(
+                "Selecciona primero un modelo concreto en Modelos > Analisis de imagenes"
+            )
         result = await analyze_image(
             image_bytes=image_bytes,
             media_type=media_type,
             question=question,
             model=selected_model,
-            fallback_models=fallbacks,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1519,6 +1533,11 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
     if target_config is None:
         raise HTTPException(status_code=400, detail="Destino de modelo no valido")
     if requested.lower() in {"", "auto", "automatico", "automático", "router"}:
+        if target_config.get("requires_images"):
+            raise HTTPException(
+                status_code=400,
+                detail="Analisis de imagenes requiere elegir un modelo concreto",
+            )
         set_setting(target_config["setting"], None)
         return {"ok": True, "target": target, "selected_model": None}
     router = await build_model_router()
@@ -1530,11 +1549,27 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
     if requested not in selectable:
         raise HTTPException(status_code=404, detail="Modelo no encontrado o no compatible con chat/tools")
     metadata = router.model_catalog.get(requested) or {}
-    if metadata and target_config.get("requires_images"):
-        if not suitable_image_model(requested, metadata):
+    if target_config.get("requires_images"):
+        if metadata and not suitable_image_model(requested, metadata):
             raise HTTPException(
                 status_code=400,
                 detail="Elige un modelo visual concreto; los routers variables y modelos de moderacion no son validos",
+            )
+        raw_input_price = metadata.get("input_price_per_million")
+        raw_output_price = metadata.get("output_price_per_million")
+        price_known = (
+            raw_input_price is not None
+            and raw_output_price is not None
+            and float(raw_input_price) >= 0
+            and float(raw_output_price) >= 0
+        )
+        input_price = float(raw_input_price) if price_known else -1
+        output_price = float(raw_output_price) if price_known else -1
+        is_free = price_known and input_price == 0 and output_price == 0
+        if not is_free and payload.get("cost_acknowledged") is not True:
+            raise HTTPException(
+                status_code=409,
+                detail="Confirma expresamente el posible coste antes de seleccionar este modelo visual",
             )
     elif metadata and not metadata.get("supports_tools"):
         raise HTTPException(status_code=400, detail="Ese modelo no declara soporte de herramientas")
@@ -1869,6 +1904,7 @@ function modelTargetOptions(selected = 'general') {
   return modelTargets.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
 }
 function money(v) { return v === null || v === undefined ? 'variable' : '$' + Number(v || 0).toFixed(3) + '/M'; }
+function costLabel(kind) { return kind === 'free' ? 'GRATIS' : (kind === 'paid' ? 'DE PAGO' : 'PRECIO NO VERIFICADO'); }
 function compactNumber(v) { return v ? Number(v).toLocaleString('es-ES') : '-'; }
 function setPage(name) {
   document.querySelectorAll('[data-page]').forEach(node => node.classList.toggle('active', node.dataset.page === name));
@@ -2018,6 +2054,7 @@ async function loadModels(refresh = false) {
           <div class="model-meta">
             <span class="pill price">entrada ${money(m.input_price_per_million)}</span>
             <span class="pill price">salida ${money(m.output_price_per_million)}</span>
+            <span class="pill price">${costLabel(m.cost_class)}</span>
             <span class="pill">contexto ${compactNumber(m.context_length)}</span>
             ${m.configured ? '<span class="pill">configurado</span>' : ''}
             ${m.supports_structured_outputs ? '<span class="pill">JSON</span>' : ''}
@@ -2026,7 +2063,7 @@ async function loadModels(refresh = false) {
         </div>
         <div class="row-actions">
           <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions(data.target)}</select>
-          <button class="secondary" data-model="${html(m.id)}" onclick="selectModel(this.dataset.model, this.previousElementSibling.value)">Usar</button>
+          <button class="secondary" data-model="${html(m.id)}" data-cost="${m.cost_class}" onclick="selectModel(this.dataset.model, this.previousElementSibling.value, this.dataset.cost)">Usar</button>
         </div>
       </div>`).join('') : '<p class="muted">Sin modelos para ese filtro.</p>';
   } catch (err) {
@@ -2043,9 +2080,17 @@ async function changeModelPage(delta) {
   modelState.page = Math.max(1, Math.min(modelState.totalPages, modelState.page + delta));
   await loadModels();
 }
-async function selectModel(model, target = 'general') {
+async function selectModel(model, target = 'general', costClass = 'unknown') {
   try {
-    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model, target})});
+    let costAcknowledged = false;
+    if (target === 'image_analysis' && costClass !== 'free') {
+      const warning = costClass === 'paid'
+        ? `${model} es un modelo DE PAGO. ¿Quieres seleccionarlo para analizar imagenes?`
+        : `No se ha podido verificar el precio de ${model}. Podria generar costes. ¿Quieres seleccionarlo?`;
+      if (!window.confirm(warning)) return;
+      costAcknowledged = true;
+    }
+    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model, target, cost_acknowledged: costAcknowledged})});
     const label = (modelTargets.find(([value]) => value === target) || [target, target])[1];
     showNotice(result.selected_model ? `${label}: ${result.selected_model}` : `${label}: router automatico`);
     await loadModels();

@@ -163,7 +163,8 @@ class SchedulerWebApiTest(unittest.TestCase):
         self.assertIn("Analisis de imagenes", dashboard)
         self.assertIn("modelTargetOptions", dashboard)
         self.assertIn('data-model="${html(m.id)}"', dashboard)
-        self.assertIn("selectModel(this.dataset.model, this.previousElementSibling.value)", dashboard)
+        self.assertIn("selectModel(this.dataset.model, this.previousElementSibling.value, this.dataset.cost)", dashboard)
+        self.assertIn("PRECIO NO VERIFICADO", dashboard)
         self.assertNotIn('onclick="selectModel(${JSON.stringify(m.id)}', dashboard)
 
     def test_web_ha_base_url_accepts_addon_ha_url_without_duplicate_api(self) -> None:

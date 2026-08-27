@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from services.whatsapp_bridge import (
@@ -30,6 +31,14 @@ def config(**overrides):
 
 
 class DummyAgent:
+    def __init__(self):
+        self.memory = SimpleNamespace(get_setting=lambda key: "vision/test")
+        self.router = SimpleNamespace(
+            model_catalog={
+                "vision/test": {"supports_images": True, "supports_chat": True}
+            }
+        )
+
     async def ask(self, user_text, task="homeassistant", preferred_model=None):
         return f"respuesta: {user_text}"
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.9
+
+- Usa exclusivamente el modelo visual elegido; nunca cambia silenciosamente a otro modelo.
+- Exige una seleccion visual concreta tanto en el portal como en WhatsApp.
+- Identifica modelos gratuitos, de pago o con precio no verificado y pide confirmacion antes de seleccionar los dos ultimos.
+
 ## 0.3.8
 
 - Excluye routers variables y modelos de moderación del selector visual.

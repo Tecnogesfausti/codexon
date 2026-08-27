@@ -25,8 +25,7 @@ routes:
   homeassistant:
     model: deepseek/deepseek-v4-flash-0731
     requires_tools: true
-    fallbacks:
-      - openai/gpt-4.1-mini
+    fallbacks: []
       - openai/gpt-4.1-nano
     reason: Interpretacion de sensores y seguimiento de herramientas con coste bajo.
 
@@ -79,8 +78,7 @@ routes:
   image_analysis:
     model: google/gemini-2.5-flash-lite
     priority: quality
-    fallbacks:
-      - openai/gpt-4.1-mini
+    fallbacks: []
     reason: Analisis visual independiente para el portal y las fotos recibidas por WhatsApp.
 
   translation:
