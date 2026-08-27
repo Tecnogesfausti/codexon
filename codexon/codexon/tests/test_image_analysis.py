@@ -26,10 +26,12 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
             media_type="image/jpeg",
             question="¿Qué ves?",
             client=client,
+            model="vision/selected",
         )
 
         self.assertEqual(result, {"answer": "Veo una planta.", "model": "vision/test"})
         request = create.await_args.kwargs
+        self.assertEqual(request["model"], "vision/selected")
         content = request["messages"][1]["content"]
         self.assertEqual(content[0]["text"], "¿Qué ves?")
         self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,"))
@@ -41,10 +43,15 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
             validate_image(image_bytes=b"", media_type="image/png")
 
     async def test_web_endpoint_returns_answer_in_same_request(self) -> None:
-        with patch.object(
-            codexon_web,
-            "analyze_image",
-            AsyncMock(return_value={"answer": "Un contador", "model": "vision/test"}),
+        router = SimpleNamespace(config={"routes": {"image_analysis": {"model": "vision/default"}}})
+        with (
+            patch.object(codexon_web, "get_setting", return_value="vision/selected"),
+            patch.object(codexon_web, "build_model_router", AsyncMock(return_value=router)),
+            patch.object(
+                codexon_web,
+                "analyze_image",
+                AsyncMock(return_value={"answer": "Un contador", "model": "vision/selected"}),
+            ) as analyzer,
         ):
             result = await codexon_web.api_image_analysis(
                 {
@@ -54,6 +61,7 @@ class ImageAnalysisTest(unittest.IsolatedAsyncioTestCase):
                 }
             )
         self.assertEqual(result["answer"], "Un contador")
+        self.assertEqual(analyzer.await_args.kwargs["model"], "vision/selected")
 
     async def test_web_endpoint_rejects_bad_base64(self) -> None:
         with self.assertRaises(HTTPException) as raised:

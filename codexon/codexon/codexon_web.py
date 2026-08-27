@@ -67,7 +67,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.5")
+app = FastAPI(title="Codexon", version="0.3.6")
 
 
 @app.middleware("http")
@@ -322,6 +322,12 @@ MODEL_SELECTION_TARGETS = {
         "setting": "statistical_reasoning_model",
         "route": "statistical_reasoning",
     },
+    "image_analysis": {
+        "label": "Analisis de imagenes",
+        "setting": "image_analysis_model",
+        "route": "image_analysis",
+        "requires_images": True,
+    },
 }
 
 
@@ -347,6 +353,7 @@ def model_row(
         "configured": model_id in router.configured_models(),
         "supports_tools": bool(meta.get("supports_tools")),
         "supports_chat": bool(meta.get("supports_chat", True)),
+        "supports_images": bool(meta.get("supports_images")),
         "supports_structured_outputs": bool(meta.get("supports_structured_outputs")),
         "context_length": meta.get("context_length"),
         "input_price_per_million": input_price,
@@ -856,10 +863,16 @@ async def api_image_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     encoded = str(payload.get("image_base64") or "").strip()
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
+        router = await build_model_router()
+        route = (router.config.get("routes") or {}).get("image_analysis") or {}
+        selected_model = get_setting("image_analysis_model") or str(
+            route.get("model") or "openrouter/auto"
+        )
         result = await analyze_image(
             image_bytes=image_bytes,
             media_type=media_type,
             question=question,
+            model=selected_model,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1401,13 +1414,23 @@ async def api_models(
     sort: str = "",
     configured_only: bool = False,
     refresh: bool = False,
+    target: str = "general",
 ) -> dict[str, Any]:
     router = await build_model_router(refresh=refresh)
+    target_config = MODEL_SELECTION_TARGETS.get(target)
+    if target_config is None:
+        raise HTTPException(status_code=400, detail="Destino de modelo no valido")
     selected_models = {
         target: get_setting(config["setting"]) or None
         for target, config in MODEL_SELECTION_TARGETS.items()
     }
-    models = router.configured_models() if configured_only else router.selectable_models()
+    if target_config.get("requires_images") and router.model_catalog:
+        models = list(router.model_catalog)
+        if configured_only:
+            configured = set(router.configured_models())
+            models = [model_id for model_id in models if model_id in configured]
+    else:
+        models = router.configured_models() if configured_only else router.selectable_models()
     if query.strip():
         folded = normalize_cancellation_key(query)
         models = [
@@ -1418,8 +1441,12 @@ async def api_models(
         model_id for model_id in models
         if not router.model_catalog
         or (
-            (router.model_catalog.get(model_id) or {}).get("supports_tools")
-            and (router.model_catalog.get(model_id) or {}).get("supports_chat", True)
+            (router.model_catalog.get(model_id) or {}).get("supports_chat", True)
+            and (
+                (router.model_catalog.get(model_id) or {}).get("supports_images")
+                if target_config.get("requires_images")
+                else (router.model_catalog.get(model_id) or {}).get("supports_tools")
+            )
         )
     ]
     if sort in {"cost", "cost_asc", "precio", "precio_asc"}:
@@ -1462,6 +1489,7 @@ async def api_models(
         "total": len(models),
         "total_pages": total_pages,
         "models": [model_row(router, model_id, selected_models) for model_id in visible],
+        "target": target,
     }
 
 
@@ -1476,11 +1504,18 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
         set_setting(target_config["setting"], None)
         return {"ok": True, "target": target, "selected_model": None}
     router = await build_model_router()
-    selectable = set(router.selectable_models())
+    selectable = (
+        set(router.model_catalog)
+        if target_config.get("requires_images") and router.model_catalog
+        else set(router.selectable_models())
+    )
     if requested not in selectable:
         raise HTTPException(status_code=404, detail="Modelo no encontrado o no compatible con chat/tools")
     metadata = router.model_catalog.get(requested) or {}
-    if metadata and not metadata.get("supports_tools"):
+    if metadata and target_config.get("requires_images"):
+        if not metadata.get("supports_images"):
+            raise HTTPException(status_code=400, detail="Ese modelo no admite entrada de imagen")
+    elif metadata and not metadata.get("supports_tools"):
         raise HTTPException(status_code=400, detail="Ese modelo no declara soporte de herramientas")
     set_setting(target_config["setting"], requested)
     return {"ok": True, "target": target, "selected_model": requested}
@@ -1616,7 +1651,7 @@ def index() -> str:
         <h2>Modelos IA</h2>
         <div class="toolbar">
           <label>Buscar<input id="modelQuery" placeholder="deepseek, gpt, gemini..." oninput="debouncedLoadModels()" /></label>
-          <label>Perfil automatico<select id="modelAutoTarget"></select></label>
+          <label>Perfil a configurar<select id="modelAutoTarget" onchange="modelState.page = 1; loadModels()"></select></label>
           <button class="ghost" onclick="selectModel('auto', document.getElementById('modelAutoTarget').value)">Automatico</button>
           <button class="secondary" onclick="loadModels(true)">Actualizar catalogo</button>
           <label><input id="modelSortCost" type="checkbox" onchange="modelState.page = 1; loadModels()" /> menor coste</label>
@@ -1807,6 +1842,7 @@ const modelTargets = [
   ['classification', 'Clasificacion'],
   ['statistical_planning', 'Planificacion estadistica'],
   ['statistical_reasoning', 'Razonamiento estadistico'],
+  ['image_analysis', 'Analisis de imagenes'],
 ];
 function modelTargetOptions(selected = 'general') {
   return modelTargets.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
@@ -1940,11 +1976,14 @@ async function loadModels(refresh = false) {
   try {
     const query = document.getElementById('modelQuery').value || '';
     const sort = document.getElementById('modelSortCost').checked ? 'cost' : '';
-    const data = await requestJSON(`/api/models?page=${modelState.page}&page_size=50&query=${encodeURIComponent(query)}&sort=${sort}&refresh=${refresh ? 'true' : 'false'}`);
+    const activeTarget = document.getElementById('modelAutoTarget').value || 'general';
+    const data = await requestJSON(`/api/models?page=${modelState.page}&page_size=50&query=${encodeURIComponent(query)}&sort=${sort}&refresh=${refresh ? 'true' : 'false'}&target=${encodeURIComponent(activeTarget)}`);
     modelState.page = data.page;
     modelState.totalPages = data.total_pages;
     document.getElementById('modelAutoTarget').innerHTML = modelTargetOptions(document.getElementById('modelAutoTarget').value || 'general');
-    document.getElementById('modelSummary').textContent = `${data.total} modelos compatibles con chat y herramientas · cada perfil se configura por separado`;
+    document.getElementById('modelSummary').textContent = data.target === 'image_analysis'
+      ? `${data.total} modelos compatibles con entrada de imagen`
+      : `${data.total} modelos compatibles con chat y herramientas · cada perfil se configura por separado`;
     document.getElementById('modelProfiles').innerHTML = modelTargets.map(([target]) => {
       const profile = data.profiles[target];
       return `<span><strong>${html(profile.label)}</strong><br><span class="muted">${profile.automatic ? 'Automatico: ' : 'Seleccionado: '}${html(profile.effective_model)}</span></span>`;
@@ -1965,7 +2004,7 @@ async function loadModels(refresh = false) {
           </div>
         </div>
         <div class="row-actions">
-          <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions()}</select>
+          <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions(data.target)}</select>
           <button class="secondary" data-model="${html(m.id)}" onclick="selectModel(this.dataset.model, this.previousElementSibling.value)">Usar</button>
         </div>
       </div>`).join('') : '<p class="muted">Sin modelos para ese filtro.</p>';

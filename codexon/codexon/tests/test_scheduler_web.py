@@ -153,12 +153,14 @@ class SchedulerWebApiTest(unittest.TestCase):
         self.assertIn("/api/tasks?limit=200&include_done=true", dashboard)
         self.assertIn('id="taskSummary"', dashboard)
 
-    def test_dashboard_offers_four_independent_model_targets(self) -> None:
+    def test_dashboard_offers_five_independent_model_targets(self) -> None:
         dashboard = codexon_web.index()
         self.assertIn("Conversacion, HA y memoria", dashboard)
         self.assertIn("classification", dashboard)
         self.assertIn("statistical_planning", dashboard)
         self.assertIn("statistical_reasoning", dashboard)
+        self.assertIn("image_analysis", dashboard)
+        self.assertIn("Analisis de imagenes", dashboard)
         self.assertIn("modelTargetOptions", dashboard)
         self.assertIn('data-model="${html(m.id)}"', dashboard)
         self.assertIn("selectModel(this.dataset.model, this.previousElementSibling.value)", dashboard)

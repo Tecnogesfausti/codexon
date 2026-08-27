@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- Añade un quinto perfil de modelo independiente para análisis de imágenes.
+- Filtra el catálogo visual para mostrar únicamente modelos con entrada de imagen.
+- Aplica la selección visual persistente tanto al portal como a WhatsApp.
+
 ## 0.3.5
 
 - Añade análisis multimodal de imágenes desde una pestaña propia del portal.

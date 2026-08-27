@@ -638,11 +638,19 @@ class WhatsAppBridge:
                 else:
                     image_base64 = str(event.get("imageBase64") or "")
                     if image_base64:
+                        memory = getattr(self.agent, "memory", None)
+                        get_setting = getattr(memory, "get_setting", None)
+                        selected_model = (
+                            get_setting("image_analysis_model")
+                            if callable(get_setting)
+                            else None
+                        )
                         result = await analyze_image(
                             image_bytes=base64.b64decode(image_base64, validate=True),
                             media_type=str(event.get("mediaType") or "image/jpeg"),
                             question=body,
                             client=getattr(self.agent, "client", None),
+                            model=selected_model,
                         )
                         answer = result["answer"]
                     else:

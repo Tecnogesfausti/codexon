@@ -26,6 +26,7 @@ async def analyze_image(
     media_type: str,
     question: str,
     client: Any | None = None,
+    model: str | None = None,
 ) -> dict[str, str]:
     """Pregunta por una imagen usando el enrutador multimodal de OpenRouter."""
     validate_image(image_bytes=image_bytes, media_type=media_type)
@@ -44,13 +45,13 @@ async def analyze_image(
         client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
     configured_model = os.getenv("CODEXON_IMAGE_MODEL", "").strip()
-    model = configured_model or "openrouter/auto"
+    selected_model = str(model or configured_model or "openrouter/auto").strip()
     data_url = (
         f"data:{media_type};base64,"
         + base64.b64encode(image_bytes).decode("ascii")
     )
     response = await client.chat.completions.create(
-        model=model,
+        model=selected_model,
         messages=[
             {
                 "role": "system",
@@ -72,5 +73,5 @@ async def analyze_image(
     answer = str(response.choices[0].message.content or "").strip()
     if not answer:
         raise RuntimeError("El modelo no devolvio una respuesta")
-    used_model = str(getattr(response, "model", "") or model)
+    used_model = str(getattr(response, "model", "") or selected_model)
     return {"answer": answer, "model": used_model}

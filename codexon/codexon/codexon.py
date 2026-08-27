@@ -1229,6 +1229,7 @@ async def fetch_openrouter_model_catalog() -> dict[str, dict[str, Any]]:
             output_price = 0.0
         params = set(model.get("supported_parameters") or [])
         architecture = model.get("architecture") or {}
+        input_modalities = architecture.get("input_modalities") or []
         output_modalities = architecture.get("output_modalities") or []
         catalog[model_id] = {
             "id": model_id,
@@ -1240,6 +1241,8 @@ async def fetch_openrouter_model_catalog() -> dict[str, dict[str, Any]]:
             "output_price_per_million": output_price * 1_000_000,
             "supports_tools": "tools" in params or "tool_choice" in params,
             "supports_chat": not output_modalities or "text" in output_modalities,
+            "supports_images": "image" in input_modalities,
+            "input_modalities": list(input_modalities),
             "output_modalities": list(output_modalities),
             "supports_structured_outputs": "structured_outputs" in params,
             "supported_parameters": sorted(params),
