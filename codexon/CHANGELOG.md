@@ -8,6 +8,7 @@
 
 ## 0.3.4
 
+- Publica los cambios del puente WhatsApp: no rechaza llamadas y mantiene el cliente vinculado fuera de línea para conservar las notificaciones del teléfono.
 - `codexon-chat` incorpora `/codex <petición>`: registra el caso, abre Codex interactivamente para enseñar o modificar el agente y vuelve al chat al cerrar la sesión de mantenimiento.
 - El prompt de mantenimiento conserva la petición original, revisa la nota y el contexto vivo, prioriza la fuente canónica, exige pruebas y no publica en GitHub sin una orden explícita.
 - Las tareas simples ya derivan el dominio de servicio del `entity_id`: un `input_boolean.*` no se convierte erróneamente en `switch.turn_on/turn_off`.
