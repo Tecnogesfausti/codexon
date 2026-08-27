@@ -25,6 +25,34 @@ roles:
     entity_id: sensor.hvac_power
     label: climate power
 
+  environment.indoor_light:
+    entity_id: sensor.living_room_illuminance
+    label: indoor illuminance
+
+  environment.outdoor_radiation:
+    entity_id: sensor.outdoor_illuminance
+    label: outdoor light or solar radiation
+
+  environment.outdoor_temperature:
+    entity_id: sensor.outdoor_temperature
+    label: outdoor temperature
+
+  environment.outdoor_humidity:
+    entity_id: sensor.outdoor_humidity
+    label: outdoor humidity
+
+  environment.outdoor_rain:
+    entity_id: sensor.outdoor_rain
+    label: rain
+
+  environment.outdoor_wind_speed:
+    entity_id: sensor.outdoor_wind_speed
+    label: wind speed
+
+  environment.outdoor_wind_gust:
+    entity_id: sensor.outdoor_wind_gust
+    label: wind gust
+
   energy.price:
     entity_id: sensor.electricity_price
     label: electricity price

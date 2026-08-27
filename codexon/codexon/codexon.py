@@ -4661,7 +4661,17 @@ Tareas pendientes:
             if requested_light_sensation(user_text):
                 try:
                     state_rows: list[tuple[str, dict[str, Any]]] = []
-                    for entity_id in ("sensor.muralcocina_tsl2561_sensor_luz", "sensor.itorre692_solar_radiation"):
+                    interior_light = self.site_profile.entity(
+                        "environment.indoor_light",
+                        "sensor.muralcocina_tsl2561_sensor_luz",
+                    )
+                    exterior_light = self.site_profile.entity(
+                        "environment.outdoor_radiation",
+                        "sensor.itorre692_solar_radiation",
+                    )
+                    for entity_id in (interior_light, exterior_light):
+                        if not entity_id:
+                            continue
                         state_rows.append(
                             (
                                 entity_id,
@@ -4673,7 +4683,11 @@ Tareas pendientes:
                                 ),
                             )
                         )
-                    answer = format_light_sensation_answer(state_rows)
+                    answer = format_light_sensation_answer(
+                        state_rows,
+                        interior_entity=str(interior_light),
+                        exterior_entity=str(exterior_light),
+                    )
                 except Exception as exc:
                     answer = f"No pude consultar la sensación lumínica: {exc}"
                 self.messages.extend(

@@ -32,6 +32,7 @@ CODEXON_WEB_ENABLED="$(read_bool codexon_web_enabled)"
 CODEXON_POLL_SECONDS="$(read_option codexon_poll_seconds 300)"
 CODEXON_SENSOR_PROMPT="$(read_option codexon_sensor_prompt "Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen.")"
 CODEXON_FS_ROOTS="$(read_option codexon_fs_roots /ha_config,/addon_config,/share)"
+CODEXON_SITE_PROFILE="$(read_option codexon_site_profile /addon_config/site.yaml)"
 CODEXON_NO_SENSOR_LOOP="$(read_bool codexon_no_sensor_loop)"
 CODEXON_ALLOW_ACTIONS_WITHOUT_CONFIRMATION="$(read_bool codexon_allow_actions_without_confirmation)"
 CODEXON_WHATSAPP_ENABLED="$(read_bool codexon_whatsapp_enabled)"
@@ -72,6 +73,13 @@ export SUPERVISOR_URL="http://supervisor"
 
 mkdir -p "$CODEX_HOME" "$WORKSPACE" "$PLATFORMIO_CORE_DIR" "$PLATFORMIO_PACKAGES_DIR" /data/logs /data/mcp /data/codexon /run/sshd
 
+# The private installation profile lives outside the replaceable image.
+mkdir -p "$(dirname "$CODEXON_SITE_PROFILE")"
+if [[ ! -f "$CODEXON_SITE_PROFILE" && -f /data/codexon/site.yaml ]]; then
+  cp -p /data/codexon/site.yaml "$CODEXON_SITE_PROFILE"
+fi
+export CODEXON_SITE_PROFILE
+
 CODEXON_IMPORT_ROOT=/share/codexon-migration
 CODEXON_IMPORT_MARKER=/data/codexon/migrations/local-data-v1
 if [[ -d "$CODEXON_IMPORT_ROOT" && ! -f "$CODEXON_IMPORT_MARKER" ]]; then
@@ -93,7 +101,7 @@ if [[ ! -f /data/codexon/app/codexon.py ]]; then
   rsync -a /opt/codexon/app/ /data/codexon/app/
 fi
 
-CODEXON_RUNTIME_MIGRATION=runtime-0.3.6
+CODEXON_RUNTIME_MIGRATION=runtime-0.3.7
 CODEXON_MIGRATION_DIR=/data/codexon/migrations
 CODEXON_MIGRATION_MARKER="${CODEXON_MIGRATION_DIR}/${CODEXON_RUNTIME_MIGRATION}"
 if [[ ! -f "$CODEXON_MIGRATION_MARKER" ]]; then
@@ -195,6 +203,7 @@ start_codexon() {
   export CODEXON_POLL_SECONDS="$CODEXON_POLL_SECONDS"
   export CODEXON_SENSOR_PROMPT="$CODEXON_SENSOR_PROMPT"
   export CODEXON_FS_ROOTS="$CODEXON_FS_ROOTS"
+  export CODEXON_SITE_PROFILE
   export CODEXON_WHATSAPP_ENABLED
   export CODEXON_WHATSAPP_ALLOWED_SENDERS
   export CODEXON_WHATSAPP_WAKE_WORDS

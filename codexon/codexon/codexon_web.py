@@ -59,6 +59,7 @@ AGENTS_DIR = Path(os.getenv("CODEXON_AGENTS_DIR", "agents"))
 AGENT_CONFIG_PATH = Path(os.getenv("CODEXON_AGENT_CONFIG", str(DATA_DIR / "agent_config.json")))
 CODEX_CONTEXT_PATH = Path(os.getenv("CODEXON_CODEX_CONTEXT", str(DATA_DIR / "CODEX_CONTEXT.md")))
 CODEX_NOTES_PATH = Path(os.getenv("CODEXON_CODEX_NOTES", str(DATA_DIR / "CODEX_NOTES.md")))
+SITE_PROFILE_PATH = Path(os.getenv("CODEXON_SITE_PROFILE", "/addon_config/site.yaml"))
 BACKUP_DIR = Path(os.getenv("CODEXON_BACKUP_DIR", str(DATA_DIR / "backups")))
 WHATSAPP_DATA_DIR = Path(
     os.getenv("CODEXON_WHATSAPP_DATA_DIR", str(DATA_DIR / "whatsapp"))
@@ -67,7 +68,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.6")
+app = FastAPI(title="Codexon", version="0.3.7")
 
 
 @app.middleware("http")
@@ -666,6 +667,7 @@ def backup_sources() -> list[tuple[Path, str]]:
         (AGENT_CONFIG_PATH, "data/agent_config.json"),
         (CODEX_CONTEXT_PATH, "data/CODEX_CONTEXT.md"),
         (CODEX_NOTES_PATH, "data/CODEX_NOTES.md"),
+        (SITE_PROFILE_PATH, "private/site.yaml"),
         (LOG_PATH, "data/codexon_runtime.log"),
     ]:
         if path.exists():

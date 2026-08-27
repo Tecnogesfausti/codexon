@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.7
+
+- Mueve el perfil privado de la vivienda a `/addon_config/site.yaml`, persistente entre reconstrucciones.
+- Migra automáticamente el perfil antiguo de `/data/codexon/site.yaml` sin sobrescribir uno existente.
+- Resuelve los sensores de luminosidad interior y exterior mediante roles del perfil local.
+- Incluye el perfil privado en los backups de Codexon, pero nunca en el repositorio público.
+
 ## 0.3.6
 
 - Añade un quinto perfil de modelo independiente para análisis de imágenes.

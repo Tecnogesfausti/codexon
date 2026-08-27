@@ -1,6 +1,6 @@
 name: Codexon
 slug: codexon
-version: "0.3.6"
+version: "0.3.7"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/codexon
 arch:
@@ -90,6 +90,7 @@ options:
   codexon_poll_seconds: 300
   codexon_sensor_prompt: "Consulta sensores de presencia, puertas, ventanas, movimiento, alarma y cámaras si existen."
   codexon_fs_roots: "/ha_config,/addon_config,/share"
+  codexon_site_profile: "/addon_config/site.yaml"
   codexon_no_sensor_loop: false
   codexon_allow_actions_without_confirmation: false
   codexon_whatsapp_enabled: false
@@ -118,6 +119,7 @@ schema:
   codexon_poll_seconds: "int(30,86400)"
   codexon_sensor_prompt: "str"
   codexon_fs_roots: "str"
+  codexon_site_profile: "str"
   codexon_no_sensor_loop: "bool"
   codexon_allow_actions_without_confirmation: "bool"
   codexon_whatsapp_enabled: "bool"
