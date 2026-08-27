@@ -136,6 +136,10 @@ class SchedulerWebApiTest(unittest.TestCase):
 
     def test_dashboard_contains_event_listener_controls(self) -> None:
         dashboard = codexon_web.index()
+        self.assertIn('data-tab="imagenes"', dashboard)
+        self.assertIn('id="imageAnalysisFile"', dashboard)
+        self.assertIn('id="imageAnalysisQuestion"', dashboard)
+        self.assertIn("/api/image-analysis", dashboard)
         self.assertIn('data-tab="escuchas"', dashboard)
         self.assertIn('id="listeners"', dashboard)
         self.assertIn("cancelListener", dashboard)
@@ -156,6 +160,9 @@ class SchedulerWebApiTest(unittest.TestCase):
         self.assertIn("statistical_planning", dashboard)
         self.assertIn("statistical_reasoning", dashboard)
         self.assertIn("modelTargetOptions", dashboard)
+        self.assertIn('data-model="${html(m.id)}"', dashboard)
+        self.assertIn("selectModel(this.dataset.model, this.previousElementSibling.value)", dashboard)
+        self.assertNotIn('onclick="selectModel(${JSON.stringify(m.id)}', dashboard)
 
     def test_web_ha_base_url_accepts_addon_ha_url_without_duplicate_api(self) -> None:
         with patch.dict("os.environ", {"HA_URL": "http://homeassistant:8123/api"}, clear=False):

@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   getContentType,
   useMultiFileAuthState
@@ -124,29 +125,43 @@ async function handleConnectionUpdate(update) {
   }
 }
 
-function handleMessagesUpsert({ messages, type }) {
+async function handleMessagesUpsert({ messages, type }) {
   if (type !== 'notify') return;
   for (const message of messages) {
     if (!message.message || !message.key?.id || seenMessageIds.has(message.key.id)) continue;
     rememberMessageId(message.key.id);
-    const normalized = normalizeMessage(message);
+    const normalized = await normalizeMessage(message);
     if (!normalized.body) continue;
-    lastMessage = normalized;
+    const persisted = { ...normalized, hasImage: Boolean(normalized.imageBase64) };
+    delete persisted.imageBase64;
+    lastMessage = persisted;
     messageCount += 1;
     upsertContact({
       id: normalized.from,
       name: normalized.pushName,
       notify: normalized.pushName
     });
-    recordMessage({ direction: 'incoming', ...normalized });
+    recordMessage({ direction: 'incoming', ...persisted });
     writeStatus();
     emit({ type: 'message', source: 'notify', ...normalized });
   }
 }
 
-function normalizeMessage(message) {
+async function normalizeMessage(message) {
   const content = unwrapMessage(message.message);
   const messageType = getContentType(content) || 'unknown';
+  const image = content?.imageMessage;
+  let imageBase64 = '';
+  if (image) {
+    const buffer = await downloadMediaMessage(
+      message,
+      'buffer',
+      {},
+      { logger: baileysLogger, reuploadRequest: socket.updateMediaMessage }
+    );
+    if (buffer.length > 12 * 1024 * 1024) throw new Error('imagen WhatsApp demasiado grande');
+    imageBase64 = buffer.toString('base64');
+  }
   return {
     id: message.key.id,
     from: message.key.remoteJid,
@@ -154,7 +169,9 @@ function normalizeMessage(message) {
     pushName: message.pushName || '',
     timestamp: Number(message.messageTimestamp || Math.floor(Date.now() / 1000)),
     messageType,
-    body: extractText(content, messageType)
+    body: extractText(content, messageType),
+    imageBase64,
+    mediaType: image?.mimetype || ''
   };
 }
 

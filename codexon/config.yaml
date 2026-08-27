@@ -1,6 +1,6 @@
 name: Codexon
 slug: codexon
-version: "0.3.4"
+version: "0.3.5"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/codexon
 arch:
@@ -95,6 +95,7 @@ options:
   codexon_whatsapp_enabled: false
   codexon_whatsapp_allowed_senders: []
   codexon_whatsapp_wake_words: "casa|huerto|asistente|ia|robot"
+  codexon_whatsup_wake_words: ""
 schema:
   openai_api_key: "password?"
   openrouter_api_key: "password?"
@@ -123,3 +124,4 @@ schema:
   codexon_whatsapp_allowed_senders:
     - "str"
   codexon_whatsapp_wake_words: "str?"
+  codexon_whatsup_wake_words: "str?"

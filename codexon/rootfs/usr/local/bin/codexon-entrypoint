@@ -37,6 +37,10 @@ CODEXON_ALLOW_ACTIONS_WITHOUT_CONFIRMATION="$(read_bool codexon_allow_actions_wi
 CODEXON_WHATSAPP_ENABLED="$(read_bool codexon_whatsapp_enabled)"
 CODEXON_WHATSAPP_ALLOWED_SENDERS="$(jq -c '.codexon_whatsapp_allowed_senders // []' "$CONFIG_PATH")"
 CODEXON_WHATSAPP_WAKE_WORDS="$(read_option codexon_whatsapp_wake_words)"
+CODEXON_WHATSUP_WAKE_WORDS="$(read_option codexon_whatsup_wake_words)"
+if [[ -n "$CODEXON_WHATSUP_WAKE_WORDS" ]]; then
+  CODEXON_WHATSAPP_WAKE_WORDS="$CODEXON_WHATSUP_WAKE_WORDS"
+fi
 
 CODEX_TERMINAL_PORT=8100
 CODEXON_WEB_PORT=8098
@@ -89,7 +93,7 @@ if [[ ! -f /data/codexon/app/codexon.py ]]; then
   rsync -a /opt/codexon/app/ /data/codexon/app/
 fi
 
-CODEXON_RUNTIME_MIGRATION=runtime-0.3.4
+CODEXON_RUNTIME_MIGRATION=runtime-0.3.5
 CODEXON_MIGRATION_DIR=/data/codexon/migrations
 CODEXON_MIGRATION_MARKER="${CODEXON_MIGRATION_DIR}/${CODEXON_RUNTIME_MIGRATION}"
 if [[ ! -f "$CODEXON_MIGRATION_MARKER" ]]; then

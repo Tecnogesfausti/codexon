@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from services.whatsapp_bridge import (
     WhatsAppBridge,
@@ -398,3 +399,32 @@ class WhatsAppBridgeAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent[0]["replyTo"], "message-1")
         self.assertIn("mensaje entrante de WhatsApp", sent[0]["message"])
         self.assertTrue(sent[0]["message"].endswith("estado"))
+
+    async def test_processes_prefixed_image_question_with_multimodal_analyzer(self):
+        bridge = WhatsAppBridge(DummyAgent(), config=config(wake_words=("casa",)))
+        sent = []
+
+        async def capture(payload):
+            sent.append(payload)
+
+        bridge._send = capture
+        event = {
+            "source": "notify",
+            "id": "image-1",
+            "from": "34600123123@s.whatsapp.net",
+            "body": "casa ¿qué aparece?",
+            "mediaType": "image/jpeg",
+            "imageBase64": "aW1hZ2Vu",
+        }
+        self.assertTrue(bridge._accept_message(event))
+        with patch(
+            "services.whatsapp_bridge.analyze_image",
+            AsyncMock(return_value={"answer": "Aparece una maceta", "model": "vision/test"}),
+        ) as analyzer:
+            task = asyncio.create_task(bridge._process_messages())
+            await bridge._messages.put(event)
+            await bridge._messages.put(None)
+            await task
+
+        self.assertEqual(analyzer.await_args.kwargs["question"], "¿qué aparece?")
+        self.assertEqual(sent[0]["message"], "Aparece una maceta")

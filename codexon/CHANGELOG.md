@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.5
+
+- Añade análisis multimodal de imágenes desde una pestaña propia del portal.
+- Procesa fotos con preguntas prefijadas recibidas por WhatsApp.
+- Evita persistir el contenido binario de las imágenes en el historial del canal.
+
 ## 0.3.4
 
 - `codexon-chat` incorpora `/codex <petición>`: registra el caso, abre Codex interactivamente para enseñar o modificar el agente y vuelve al chat al cerrar la sesión de mantenimiento.

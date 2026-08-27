@@ -51,3 +51,34 @@ class WhatsAppWebStatusTest(unittest.TestCase):
         self.assertFalse(status["enabled"])
         self.assertEqual(status["state"], "disabled")
         self.assertIsNone(status["qrDataUrl"])
+
+    def test_contacts_and_recent_messages_are_sanitized_for_panel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            data_dir = Path(temporary)
+            (data_dir / "contacts.json").write_text(
+                json.dumps({"contacts": [{"id": "34600@s.whatsapp.net", "name": "Casa", "phone": "34600", "secret": "omit"}]}),
+                encoding="utf-8",
+            )
+            (data_dir / "messages.json").write_text(
+                json.dumps({"messages": [{"direction": "incoming", "from": "34600@s.whatsapp.net", "pushName": "Casa", "timestamp": 1, "body": "Hola", "id": "omit"}]}),
+                encoding="utf-8",
+            )
+            with patch.object(codexon_web, "WHATSAPP_DATA_DIR", data_dir):
+                contacts = codexon_web.api_whatsapp_contacts()
+                messages = codexon_web.api_whatsapp_messages()
+
+        self.assertEqual(contacts["contacts"], [{"id": "34600@s.whatsapp.net", "name": "Casa", "phone": "34600"}])
+        self.assertEqual(messages["messages"][0]["body"], "Hola")
+        self.assertNotIn("id", messages["messages"][0])
+
+    def test_send_creates_single_attempt_immediate_task_when_connected(self):
+        with (
+            patch.object(codexon_web, "whatsapp_status", return_value={"state": "connected"}),
+            patch.object(codexon_web, "api_create_task", return_value={"ok": True, "id": 42}) as create,
+        ):
+            result = codexon_web.api_whatsapp_send({"recipient": "Casa", "message": "Hola"})
+
+        self.assertEqual(result, {"ok": True, "task_id": 42})
+        payload = create.call_args.args[0]
+        self.assertEqual(payload["max_attempts"], 1)
+        self.assertIn("whatsapp_send_message", payload["instruction"])

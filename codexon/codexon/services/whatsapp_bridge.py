@@ -7,6 +7,7 @@ por stdin/stdout, sin HTTP, MQTT, puertos ni credenciales internas.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -15,6 +16,8 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
+
+from services.image_analysis import analyze_image
 
 
 class CodexonConversation(Protocol):
@@ -469,6 +472,10 @@ class WhatsAppBridge:
                 continue
             event_type = event.get("type")
             if event_type == "message":
+                # El sensor de HA recibe todos los mensajes, aunque no lleven
+                # palabra de activación para Codexon.
+                await self._publish_message_sensor(event)
+                await self._notify_nspanel(event)
                 if not self._accept_message(event):
                     continue
                 try:
@@ -629,9 +636,19 @@ class WhatsAppBridge:
                             )
                         )
                 else:
-                    answer = await self.agent.ask(
-                        request, task="homeassistant"
-                    )
+                    image_base64 = str(event.get("imageBase64") or "")
+                    if image_base64:
+                        result = await analyze_image(
+                            image_bytes=base64.b64decode(image_base64, validate=True),
+                            media_type=str(event.get("mediaType") or "image/jpeg"),
+                            question=body,
+                            client=getattr(self.agent, "client", None),
+                        )
+                        answer = result["answer"]
+                    else:
+                        answer = await self.agent.ask(
+                            request, task="homeassistant"
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - hay que contestar al usuario
@@ -651,6 +668,71 @@ class WhatsAppBridge:
                         "replyTo": message_id,
                     }
                 )
+
+    async def _publish_message_sensor(self, event: dict[str, Any]) -> None:
+        """Publica cada mensaje aceptado como estado suscribible en HA."""
+        base_url = str(getattr(self.agent, "ha_base_url", None) or "").rstrip("/")
+        token = str(getattr(self.agent, "ha_token", None) or "")
+        httpx = getattr(self.agent, "httpx", None)
+        if not base_url or not token or httpx is None:
+            return
+        now = time.time()
+        sender_jid = str(event.get("from") or "")
+        body = str(event.get("body") or "")
+        payload = {
+            "state": str(event.get("timestamp") or int(now)),
+            "attributes": {
+                "friendly_name": "WhatsApp · Último mensaje Codexon",
+                "icon": "mdi:whatsapp",
+                "message": body,
+                "sender": normalize_sender(sender_jid),
+                "sender_jid": sender_jid,
+                "sender_name": str(event.get("pushName") or sender_jid),
+                "chat_id": str(event.get("chatId") or sender_jid),
+                "chat_name": str(event.get("chatName") or ""),
+                "message_id": str(event.get("id") or ""),
+                "received_at": now,
+                "channel": "whatsapp_baileys",
+            },
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                response = await http.post(
+                    f"{base_url}/api/states/sensor.codexon_whatsapp_ultimo_mensaje",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+                response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001 - no bloquear la respuesta WhatsApp
+            self._log("warn", "no se pudo publicar el sensor WhatsApp en HA", error=str(exc))
+
+    async def _notify_nspanel(self, event: dict[str, Any]) -> None:
+        """Emite dos pitidos en el NSPanel al llegar un mensaje entrante."""
+        if event.get("fromMe") is True:
+            return
+        base_url = str(getattr(self.agent, "ha_base_url", None) or "").rstrip("/")
+        token = str(getattr(self.agent, "ha_token", None) or "")
+        httpx = getattr(self.agent, "httpx", None)
+        if not base_url or not token or httpx is None:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                response = await http.post(
+                    f"{base_url}/api/services/esphome/nspanel_978124_rtttl_play",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    json={"tone": "whatsapp:d=16,o=6,b=180:g,16p,g"},
+                )
+                response.raise_for_status()
+        except Exception as exc:  # noqa: BLE001 - no bloquear la recepción
+            self._log("warn", "no se pudo emitir el aviso WhatsApp en NSPanel", error=str(exc))
 
     async def _send(self, payload: dict[str, Any]) -> None:
         process = self.process
