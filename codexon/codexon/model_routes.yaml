@@ -25,7 +25,8 @@ routes:
   homeassistant:
     model: deepseek/deepseek-v4-flash-0731
     requires_tools: true
-    fallbacks: []
+    fallbacks:
+      - openai/gpt-4.1-mini
       - openai/gpt-4.1-nano
     reason: Interpretacion de sensores y seguimiento de herramientas con coste bajo.
 

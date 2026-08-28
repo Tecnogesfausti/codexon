@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.10
+
+- Corrige la sintaxis de `model_routes.yaml` que impedía arrancar el servicio principal y el puente WhatsApp en la versión 0.3.9.
+- Añade una prueba que valida el YAML completo para impedir que una configuración inválida vuelva a publicarse.
+
 ## 0.3.9
 
 - Usa exclusivamente el modelo visual elegido; nunca cambia silenciosamente a otro modelo.
