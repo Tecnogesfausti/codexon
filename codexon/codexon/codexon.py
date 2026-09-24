@@ -4658,7 +4658,7 @@ Tareas pendientes:
             if requested_light_sensation(user_text):
                 try:
                     state_rows: list[tuple[str, dict[str, Any]]] = []
-                    for entity_id in ("sensor.muralcocina_tsl2561_sensor_luz", "sensor.itorre692_solar_radiation"):
+                    for entity_id in ("sensor.muralcocina_tsl2561_sensor_luz", "sensor.estacion_meteo_luminosidad"):
                         state_rows.append(
                             (
                                 entity_id,

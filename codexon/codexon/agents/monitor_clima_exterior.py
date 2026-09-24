@@ -14,7 +14,12 @@ class MonitorClimaExteriorAgent(Agent):
             "persianas, riego y actividad exterior."
         ),
         priority=75,
-        entities=("sensor.temperatura_exterior", "sensor.humedad_exterior"),
+        entities=(
+            "sensor.estacion_meteo_temperatura_exterior",
+            "sensor.estacion_meteo_humedad_exterior",
+            "sensor.estacion_meteo_lluvia",
+            "sensor.estacion_meteo_velocidad_viento_maxima",
+        ),
         wake_events=("state_changed", "time_pattern"),
         frequency_seconds=900,
         daily_llm_budget_tokens=800,

@@ -46,6 +46,7 @@ let shuttingDown = false;
 let messageCount = 0;
 let lastMessage = null;
 let qrText = null;
+const bridgeStartedAt = Math.floor(Date.now() / 1000);
 const contacts = new Map();
 const recentMessages = [];
 const seenMessageIds = new Set();
@@ -126,9 +127,15 @@ async function handleConnectionUpdate(update) {
 }
 
 async function handleMessagesUpsert({ messages, type }) {
-  if (type !== 'notify') return;
+  // Baileys normally reports remote messages as `notify`, but messages sent
+  // from the primary phone can be synchronized to a linked device as
+  // `append`.  Treat recent append events as live messages too while ignoring
+  // older history delivered during startup/reconnection.
+  if (type !== 'notify' && type !== 'append') return;
   for (const message of messages) {
     if (!message.message || !message.key?.id || seenMessageIds.has(message.key.id)) continue;
+    const timestamp = Number(message.messageTimestamp || 0);
+    if (type === 'append' && timestamp < bridgeStartedAt - 120) continue;
     rememberMessageId(message.key.id);
     const normalized = await normalizeMessage(message);
     if (!normalized.body) continue;
@@ -143,7 +150,7 @@ async function handleMessagesUpsert({ messages, type }) {
     });
     recordMessage({ direction: 'incoming', ...persisted });
     writeStatus();
-    emit({ type: 'message', source: 'notify', ...normalized });
+    emit({ type: 'message', source: 'notify', upsertType: type, ...normalized });
   }
 }
 

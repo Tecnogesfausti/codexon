@@ -14,6 +14,9 @@ __pycache__/
 .*_history
 *.log
 
+# Private per-installation profile. Keep only site.example.yaml in Git.
+/codexon/site.yaml
+
 # Keep examples/templates tracked.
 !*.example.yaml
 !*.example.yml
