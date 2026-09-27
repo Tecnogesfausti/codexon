@@ -115,13 +115,13 @@
         <div id="attachments" class="attachment-list"></div>
         <textarea id="prompt" placeholder="Escribe lo que quieres hacer en esta carpeta… (Ctrl+Enter para enviar)"></textarea>
         <div class="compose-bottom">
-          <label title="OpenCode podrá ejecutar comandos y modificar archivos en esta ejecución"><input id="allowActions" type="checkbox"> Permitir comandos y cambios</label>
+          <label title="OpenCode puede usar Bash y crear o modificar archivos"><input id="allowActions" type="checkbox" checked> Bash y escritura habilitados</label>
           <div class="compose-actions">
             <button id="stopButton" disabled>Detener</button>
             <button id="sendButton" class="primary">Enviar</button>
           </div>
         </div>
-        <div class="status">Sin marcar, OpenCode solo puede leer y buscar archivos. Marca la casilla para autorizar cambios en esta petición.</div>
+        <div class="status">OpenCode puede ejecutar herramientas y crear archivos. Desmarca la casilla para usar solo lectura en esta petición.</div>
         <div id="exchangeInfo" class="usage-detail">Coste estimado con el cambio de referencia del BCE.</div>
         <div id="status" class="status"></div>
       </div>
@@ -337,7 +337,6 @@
           files, allow_actions:$('allowActions').checked,
         })});
         state.runId = run.id; state.attachments.clear(); renderAttachments(); await navigate(state.path); pollRun();
-        $('allowActions').checked = false;
       } catch (error) {
         state.messages[state.assistantIndex].content = 'No se pudo iniciar: ' + error.message;
         renderMessages(); running(false); $('status').textContent = ''; showToast(error.message, true);

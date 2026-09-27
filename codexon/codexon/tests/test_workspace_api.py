@@ -7,7 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -142,6 +142,22 @@ class WorkspaceApiTest(unittest.TestCase):
             environment_for_run(True).get("OPENCODE_CONFIG_CONTENT"),
             os.environ.get("OPENCODE_CONFIG_CONTENT"),
         )
+
+    def test_prompt_uses_full_tools_unless_read_only_is_requested(self) -> None:
+        with patch("workspace_api.shutil.which", return_value="/usr/local/bin/opencode"):
+            with patch("workspace_api.execute_run", new_callable=AsyncMock) as execute:
+                started = self.client.post("/api/workspace/runs", json={
+                    "prompt": "Crea un PDF", "model": "openrouter/example/model", "directory": str(self.root),
+                })
+                self.assertEqual(started.status_code, 200)
+                self.assertTrue(execute.call_args.args[2])
+                RUNS.clear()
+                read_only = self.client.post("/api/workspace/runs", json={
+                    "prompt": "Lee este PDF", "model": "openrouter/example/model", "directory": str(self.root),
+                    "allow_actions": False,
+                })
+                self.assertEqual(read_only.status_code, 200)
+                self.assertFalse(execute.call_args.args[2])
 
     def test_prompt_runs_opencode_and_returns_text_and_session(self) -> None:
         fake = Path(self.tempdir.name) / "fake-opencode"

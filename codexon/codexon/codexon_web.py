@@ -69,7 +69,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.13")
+app = FastAPI(title="Codexon", version="0.3.14")
 app.include_router(workspace_router)
 
 

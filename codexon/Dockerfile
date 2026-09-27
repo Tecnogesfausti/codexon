@@ -5,7 +5,7 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.3.13
+ARG BUILD_VERSION=0.3.14
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG OPENCODE_NPM_PACKAGE="opencode-ai"
 ARG ESPHOME_PIP_PACKAGE="esphome"
@@ -31,24 +31,36 @@ RUN apt-get update \
     bubblewrap \
     ca-certificates \
     curl \
+    fonts-dejavu-core \
+    fonts-liberation \
     git \
     gh \
+    ghostscript \
     jq \
     less \
     nano \
     nginx \
     openssh-server \
+    pandoc \
+    poppler-utils \
     python3 \
     python3-pip \
     python3-venv \
+    qpdf \
     ripgrep \
     rsync \
     shellcheck \
     sudo \
+    texlive-lang-spanish \
+    texlive-latex-base \
+    texlive-latex-recommended \
     tmux \
     unzip \
     util-linux \
     vim-tiny \
+    wkhtmltopdf \
+    xauth \
+    xvfb \
     yq \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
@@ -93,6 +105,7 @@ RUN chmod +x \
   /usr/local/bin/ha-services \
   /usr/local/bin/ha-states \
   /usr/local/bin/host-shell \
+  /usr/local/bin/html-to-pdf \
   /usr/local/bin/web-terminal.sh \
   /usr/local/bin/supervisor-api \
   /usr/local/bin/codexon-console \

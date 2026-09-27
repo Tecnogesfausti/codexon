@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+exec xvfb-run -a wkhtmltopdf --enable-local-file-access "$@"

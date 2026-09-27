@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.14
+
+- La pestaña Archivos y OpenCode habilita Bash y escritura por defecto; se puede desmarcar la casilla para una petición de solo lectura.
+- Incorpora Pandoc, LaTeX, wkhtmltopdf con Xvfb, Poppler, qpdf y Ghostscript para crear, leer y transformar PDF. Añade el comando `html-to-pdf` para generar PDF desde HTML en modo sin pantalla.
+
 ## 0.3.13
 
 - El explorador de OpenCode permite buscar y elegir un modelo del catálogo de OpenRouter.

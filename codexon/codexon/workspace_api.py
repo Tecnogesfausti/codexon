@@ -504,7 +504,7 @@ async def api_start_run(payload: dict[str, Any]) -> dict[str, Any]:
         if old.status != "running":
             RUNS.pop(old_id, None)
     RUNS[run.id] = run
-    asyncio.create_task(execute_run(run, files, payload.get("allow_actions") is True))
+    asyncio.create_task(execute_run(run, files, payload.get("allow_actions") is not False))
     return run.public()
 
 
