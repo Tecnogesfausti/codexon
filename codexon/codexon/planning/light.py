@@ -5,12 +5,17 @@ from typing import Any
 from .climate import environment_state_value
 
 
-def format_light_sensation_answer(state_rows: list[tuple[str, dict[str, Any]]]) -> str:
+def format_light_sensation_answer(
+    state_rows: list[tuple[str, dict[str, Any]]],
+    *,
+    interior_entity: str = "sensor.muralcocina_tsl2561_sensor_luz",
+    exterior_entity: str = "sensor.itorre692_solar_radiation",
+) -> str:
     values: dict[str, tuple[float | None, str, str]] = {}
     for entity_id, state_data in state_rows:
         values[entity_id] = environment_state_value(state_data, "")
-    interior = values.get("sensor.muralcocina_tsl2561_sensor_luz", (None, "-", "lx"))
-    exterior = values.get("sensor.itorre692_solar_radiation", (None, "-", "W/m²"))
+    interior = values.get(interior_entity, (None, "-", "lx"))
+    exterior = values.get(exterior_entity, (None, "-", "W/m²"))
     interior_value, interior_text, interior_unit = interior
     exterior_value, exterior_text, exterior_unit = exterior
     if interior_value is None or exterior_value is None:
@@ -29,5 +34,6 @@ def format_light_sensation_answer(state_rows: list[tuple[str, dict[str, Any]]]) 
     return (
         f"La luz interior en cocina/comedor/salón es {interior_text}{interior_unit} "
         f"({impression}). Fuera/huerto hay {exterior_text}{exterior_unit} de radiación solar. "
-        "Para medir el efecto de cerrar persianas/estores, habría que cerrar los covers indicados, esperar a que estabilice y volver a leer sensor.muralcocina_tsl2561_sensor_luz."
+        "Para medir el efecto de cerrar persianas/estores, habría que cerrarlos, esperar a que estabilice "
+        f"y volver a leer {interior_entity}."
     )

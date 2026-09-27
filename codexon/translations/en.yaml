@@ -60,6 +60,9 @@ configuration:
   codexon_fs_roots:
     name: Codexon filesystem roots
     description: Comma-separated writable/readable roots available to Codexon tools.
+  codexon_site_profile:
+    name: Codexon site profile
+    description: Persistent private YAML profile with the Home Assistant entity roles for this installation.
   codexon_no_sensor_loop:
     name: Disable Codexon sensor loop
     description: Start Codexon without the periodic sensor loop.

@@ -4,6 +4,36 @@
 
 - Incluye OpenCode CLI (`opencode`) en la imagen para usarlo desde la terminal web y SSH.
 
+## 0.3.10
+
+- Corrige la sintaxis de `model_routes.yaml` que impedía arrancar el servicio principal y el puente WhatsApp en la versión 0.3.9.
+- Añade una prueba que valida el YAML completo para impedir que una configuración inválida vuelva a publicarse.
+
+## 0.3.9
+
+- Usa exclusivamente el modelo visual elegido; nunca cambia silenciosamente a otro modelo.
+- Exige una seleccion visual concreta tanto en el portal como en WhatsApp.
+- Identifica modelos gratuitos, de pago o con precio no verificado y pide confirmacion antes de seleccionar los dos ultimos.
+
+## 0.3.8
+
+- Excluye routers variables y modelos de moderación del selector visual.
+- Detecta respuestas que contienen únicamente etiquetas `User Safety`/`Response Safety`.
+- Reintenta automáticamente con el modelo visual predeterminado cuando el seleccionado no analiza la imagen.
+
+## 0.3.7
+
+- Mueve el perfil privado de la vivienda a `/addon_config/site.yaml`, persistente entre reconstrucciones.
+- Migra automáticamente el perfil antiguo de `/data/codexon/site.yaml` sin sobrescribir uno existente.
+- Resuelve los sensores de luminosidad interior y exterior mediante roles del perfil local.
+- Incluye el perfil privado en los backups de Codexon, pero nunca en el repositorio público.
+
+## 0.3.6
+
+- Añade un quinto perfil de modelo independiente para análisis de imágenes.
+- Filtra el catálogo visual para mostrar únicamente modelos con entrada de imagen.
+- Aplica la selección visual persistente tanto al portal como a WhatsApp.
+
 ## 0.3.5
 
 - Añade análisis multimodal de imágenes desde una pestaña propia del portal.
@@ -12,6 +42,7 @@
 
 ## 0.3.4
 
+- Publica los cambios del puente WhatsApp: no rechaza llamadas y mantiene el cliente vinculado fuera de línea para conservar las notificaciones del teléfono.
 - `codexon-chat` incorpora `/codex <petición>`: registra el caso, abre Codex interactivamente para enseñar o modificar el agente y vuelve al chat al cerrar la sesión de mantenimiento.
 - El prompt de mantenimiento conserva la petición original, revisa la nota y el contexto vivo, prioriza la fuente canónica, exige pruebas y no publica en GitHub sin una orden explícita.
 - Las tareas simples ya derivan el dominio de servicio del `entity_id`: un `input_boolean.*` no se convierte erróneamente en `switch.turn_on/turn_off`.

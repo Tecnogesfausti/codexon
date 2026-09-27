@@ -172,6 +172,12 @@ Las herramientas `create_event_listener`, `list_event_listeners` y
 `cancel_event_listener` permiten administrarlas desde la conversación. La API web
 equivalente está disponible en `/api/event-listeners`.
 
+El perfil privado de cada instalación debe guardarse en `/addon_config/site.yaml`
+(opción `codexon_site_profile`). Ese volumen sobrevive a reconstrucciones y
+actualizaciones del add-on. El arranque migra una copia antigua desde
+`/data/codexon/site.yaml` únicamente cuando todavía no existe el perfil nuevo.
+El repositorio contiene solo `site.example.yaml`; no publiques el perfil real.
+
 ## Coste Y Tokens
 
 Codexon guarda el uso de tokens y el coste estimado de cada llamada al modelo en SQLite.

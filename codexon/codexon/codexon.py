@@ -1229,6 +1229,7 @@ async def fetch_openrouter_model_catalog() -> dict[str, dict[str, Any]]:
             output_price = 0.0
         params = set(model.get("supported_parameters") or [])
         architecture = model.get("architecture") or {}
+        input_modalities = architecture.get("input_modalities") or []
         output_modalities = architecture.get("output_modalities") or []
         catalog[model_id] = {
             "id": model_id,
@@ -1240,6 +1241,8 @@ async def fetch_openrouter_model_catalog() -> dict[str, dict[str, Any]]:
             "output_price_per_million": output_price * 1_000_000,
             "supports_tools": "tools" in params or "tool_choice" in params,
             "supports_chat": not output_modalities or "text" in output_modalities,
+            "supports_images": "image" in input_modalities,
+            "input_modalities": list(input_modalities),
             "output_modalities": list(output_modalities),
             "supports_structured_outputs": "structured_outputs" in params,
             "supported_parameters": sorted(params),
@@ -4658,7 +4661,17 @@ Tareas pendientes:
             if requested_light_sensation(user_text):
                 try:
                     state_rows: list[tuple[str, dict[str, Any]]] = []
-                    for entity_id in ("sensor.muralcocina_tsl2561_sensor_luz", "sensor.estacion_meteo_luminosidad"):
+                    interior_light = self.site_profile.entity(
+                        "environment.indoor_light",
+                        "sensor.muralcocina_tsl2561_sensor_luz",
+                    )
+                    exterior_light = self.site_profile.entity(
+                        "environment.outdoor_radiation",
+                        "sensor.estacion_meteo_luminosidad",
+                    )
+                    for entity_id in (interior_light, exterior_light):
+                        if not entity_id:
+                            continue
                         state_rows.append(
                             (
                                 entity_id,
@@ -4670,7 +4683,11 @@ Tareas pendientes:
                                 ),
                             )
                         )
-                    answer = format_light_sensation_answer(state_rows)
+                    answer = format_light_sensation_answer(
+                        state_rows,
+                        interior_entity=str(interior_light),
+                        exterior_entity=str(exterior_light),
+                    )
                 except Exception as exc:
                     answer = f"No pude consultar la sensación lumínica: {exc}"
                 self.messages.extend(

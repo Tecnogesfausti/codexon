@@ -9,6 +9,10 @@ from typing import Any
 
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+SAFETY_ONLY_LINES = {
+    "user safety: safe", "response safety: safe",
+    "user safety: unsafe", "response safety: unsafe",
+}
 
 
 def validate_image(*, image_bytes: bytes, media_type: str) -> None:
@@ -26,6 +30,7 @@ async def analyze_image(
     media_type: str,
     question: str,
     client: Any | None = None,
+    model: str | None = None,
 ) -> dict[str, str]:
     """Pregunta por una imagen usando el enrutador multimodal de OpenRouter."""
     validate_image(image_bytes=image_bytes, media_type=media_type)
@@ -44,14 +49,12 @@ async def analyze_image(
         client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=api_key)
 
     configured_model = os.getenv("CODEXON_IMAGE_MODEL", "").strip()
-    model = configured_model or "openrouter/auto"
+    selected_model = str(model or configured_model or "openrouter/auto").strip()
     data_url = (
         f"data:{media_type};base64,"
         + base64.b64encode(image_bytes).decode("ascii")
     )
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[
+    messages = [
             {
                 "role": "system",
                 "content": (
@@ -66,11 +69,20 @@ async def analyze_image(
                     {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             },
-        ],
-        temperature=0.2,
+        ]
+    response = await client.chat.completions.create(
+        model=selected_model, messages=messages, temperature=0.2
     )
     answer = str(response.choices[0].message.content or "").strip()
     if not answer:
-        raise RuntimeError("El modelo no devolvio una respuesta")
-    used_model = str(getattr(response, "model", "") or model)
+        raise RuntimeError(f"{selected_model} no devolvio una respuesta")
+    normalized_lines = {
+        line.strip().casefold() for line in answer.splitlines() if line.strip()
+    }
+    if normalized_lines and normalized_lines <= SAFETY_ONLY_LINES:
+        raise RuntimeError(
+            f"{selected_model} devolvio solo una clasificacion de seguridad; "
+            "selecciona manualmente otro modelo visual"
+        )
+    used_model = str(getattr(response, "model", "") or selected_model)
     return {"answer": answer, "model": used_model}

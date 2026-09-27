@@ -59,6 +59,7 @@ AGENTS_DIR = Path(os.getenv("CODEXON_AGENTS_DIR", "agents"))
 AGENT_CONFIG_PATH = Path(os.getenv("CODEXON_AGENT_CONFIG", str(DATA_DIR / "agent_config.json")))
 CODEX_CONTEXT_PATH = Path(os.getenv("CODEXON_CODEX_CONTEXT", str(DATA_DIR / "CODEX_CONTEXT.md")))
 CODEX_NOTES_PATH = Path(os.getenv("CODEXON_CODEX_NOTES", str(DATA_DIR / "CODEX_NOTES.md")))
+SITE_PROFILE_PATH = Path(os.getenv("CODEXON_SITE_PROFILE", "/addon_config/site.yaml"))
 BACKUP_DIR = Path(os.getenv("CODEXON_BACKUP_DIR", str(DATA_DIR / "backups")))
 WHATSAPP_DATA_DIR = Path(
     os.getenv("CODEXON_WHATSAPP_DATA_DIR", str(DATA_DIR / "whatsapp"))
@@ -67,7 +68,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.5")
+app = FastAPI(title="Codexon", version="0.3.10")
 
 
 @app.middleware("http")
@@ -322,6 +323,12 @@ MODEL_SELECTION_TARGETS = {
         "setting": "statistical_reasoning_model",
         "route": "statistical_reasoning",
     },
+    "image_analysis": {
+        "label": "Analisis de imagenes",
+        "setting": "image_analysis_model",
+        "route": "image_analysis",
+        "requires_images": True,
+    },
 }
 
 
@@ -331,10 +338,18 @@ def model_row(
     selected_models: dict[str, str | None],
 ) -> dict[str, Any]:
     meta = router.model_catalog.get(model_id) or {}
-    raw_input_price = float(meta.get("input_price_per_million") or 0)
-    raw_output_price = float(meta.get("output_price_per_million") or 0)
-    input_price = raw_input_price if raw_input_price >= 0 else None
-    output_price = raw_output_price if raw_output_price >= 0 else None
+    raw_input_price = meta.get("input_price_per_million")
+    raw_output_price = meta.get("output_price_per_million")
+    input_price = (
+        float(raw_input_price)
+        if raw_input_price is not None and float(raw_input_price) >= 0
+        else None
+    )
+    output_price = (
+        float(raw_output_price)
+        if raw_output_price is not None and float(raw_output_price) >= 0
+        else None
+    )
     return {
         "id": model_id,
         "name": meta.get("name") or model_id,
@@ -347,12 +362,29 @@ def model_row(
         "configured": model_id in router.configured_models(),
         "supports_tools": bool(meta.get("supports_tools")),
         "supports_chat": bool(meta.get("supports_chat", True)),
+        "supports_images": bool(meta.get("supports_images")),
         "supports_structured_outputs": bool(meta.get("supports_structured_outputs")),
         "context_length": meta.get("context_length"),
         "input_price_per_million": input_price,
         "output_price_per_million": output_price,
         "combined_price_per_million": (input_price + output_price) if input_price is not None and output_price is not None else None,
+        "cost_class": (
+            "unknown"
+            if input_price is None or output_price is None
+            else ("free" if input_price == 0 and output_price == 0 else "paid")
+        ),
     }
+
+
+def suitable_image_model(model_id: str, metadata: dict[str, Any]) -> bool:
+    folded = normalize_cancellation_key(f"{model_id} {metadata.get('name') or ''}")
+    unsuitable = ("guard", "moderation", "content safety", "safety classifier", "shield")
+    return (
+        model_id not in {"openrouter/free", "openrouter/auto"}
+        and bool(metadata.get("supports_images"))
+        and bool(metadata.get("supports_chat", True))
+        and not any(term in folded for term in unsuitable)
+    )
 
 
 def execute_db(query: str, params: tuple[Any, ...] = ()) -> int:
@@ -659,6 +691,7 @@ def backup_sources() -> list[tuple[Path, str]]:
         (AGENT_CONFIG_PATH, "data/agent_config.json"),
         (CODEX_CONTEXT_PATH, "data/CODEX_CONTEXT.md"),
         (CODEX_NOTES_PATH, "data/CODEX_NOTES.md"),
+        (SITE_PROFILE_PATH, "private/site.yaml"),
         (LOG_PATH, "data/codexon_runtime.log"),
     ]:
         if path.exists():
@@ -856,10 +889,22 @@ async def api_image_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     encoded = str(payload.get("image_base64") or "").strip()
     try:
         image_bytes = base64.b64decode(encoded, validate=True)
+        router = await build_model_router()
+        selected_model = str(get_setting("image_analysis_model") or "").strip()
+        metadata = router.model_catalog.get(selected_model) or {}
+        if (
+            not selected_model
+            or selected_model in {"openrouter/free", "openrouter/auto"}
+            or (metadata and not suitable_image_model(selected_model, metadata))
+        ):
+            raise ValueError(
+                "Selecciona primero un modelo concreto en Modelos > Analisis de imagenes"
+            )
         result = await analyze_image(
             image_bytes=image_bytes,
             media_type=media_type,
             question=question,
+            model=selected_model,
         )
     except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1401,13 +1446,23 @@ async def api_models(
     sort: str = "",
     configured_only: bool = False,
     refresh: bool = False,
+    target: str = "general",
 ) -> dict[str, Any]:
     router = await build_model_router(refresh=refresh)
+    target_config = MODEL_SELECTION_TARGETS.get(target)
+    if target_config is None:
+        raise HTTPException(status_code=400, detail="Destino de modelo no valido")
     selected_models = {
         target: get_setting(config["setting"]) or None
         for target, config in MODEL_SELECTION_TARGETS.items()
     }
-    models = router.configured_models() if configured_only else router.selectable_models()
+    if target_config.get("requires_images") and router.model_catalog:
+        models = list(router.model_catalog)
+        if configured_only:
+            configured = set(router.configured_models())
+            models = [model_id for model_id in models if model_id in configured]
+    else:
+        models = router.configured_models() if configured_only else router.selectable_models()
     if query.strip():
         folded = normalize_cancellation_key(query)
         models = [
@@ -1418,8 +1473,12 @@ async def api_models(
         model_id for model_id in models
         if not router.model_catalog
         or (
-            (router.model_catalog.get(model_id) or {}).get("supports_tools")
-            and (router.model_catalog.get(model_id) or {}).get("supports_chat", True)
+            (router.model_catalog.get(model_id) or {}).get("supports_chat", True)
+            and (
+                suitable_image_model(model_id, router.model_catalog.get(model_id) or {})
+                if target_config.get("requires_images")
+                else (router.model_catalog.get(model_id) or {}).get("supports_tools")
+            )
         )
     ]
     if sort in {"cost", "cost_asc", "precio", "precio_asc"}:
@@ -1462,6 +1521,7 @@ async def api_models(
         "total": len(models),
         "total_pages": total_pages,
         "models": [model_row(router, model_id, selected_models) for model_id in visible],
+        "target": target,
     }
 
 
@@ -1473,14 +1533,45 @@ async def api_select_model(payload: dict[str, Any]) -> dict[str, Any]:
     if target_config is None:
         raise HTTPException(status_code=400, detail="Destino de modelo no valido")
     if requested.lower() in {"", "auto", "automatico", "automático", "router"}:
+        if target_config.get("requires_images"):
+            raise HTTPException(
+                status_code=400,
+                detail="Analisis de imagenes requiere elegir un modelo concreto",
+            )
         set_setting(target_config["setting"], None)
         return {"ok": True, "target": target, "selected_model": None}
     router = await build_model_router()
-    selectable = set(router.selectable_models())
+    selectable = (
+        set(router.model_catalog)
+        if target_config.get("requires_images") and router.model_catalog
+        else set(router.selectable_models())
+    )
     if requested not in selectable:
         raise HTTPException(status_code=404, detail="Modelo no encontrado o no compatible con chat/tools")
     metadata = router.model_catalog.get(requested) or {}
-    if metadata and not metadata.get("supports_tools"):
+    if target_config.get("requires_images"):
+        if metadata and not suitable_image_model(requested, metadata):
+            raise HTTPException(
+                status_code=400,
+                detail="Elige un modelo visual concreto; los routers variables y modelos de moderacion no son validos",
+            )
+        raw_input_price = metadata.get("input_price_per_million")
+        raw_output_price = metadata.get("output_price_per_million")
+        price_known = (
+            raw_input_price is not None
+            and raw_output_price is not None
+            and float(raw_input_price) >= 0
+            and float(raw_output_price) >= 0
+        )
+        input_price = float(raw_input_price) if price_known else -1
+        output_price = float(raw_output_price) if price_known else -1
+        is_free = price_known and input_price == 0 and output_price == 0
+        if not is_free and payload.get("cost_acknowledged") is not True:
+            raise HTTPException(
+                status_code=409,
+                detail="Confirma expresamente el posible coste antes de seleccionar este modelo visual",
+            )
+    elif metadata and not metadata.get("supports_tools"):
         raise HTTPException(status_code=400, detail="Ese modelo no declara soporte de herramientas")
     set_setting(target_config["setting"], requested)
     return {"ok": True, "target": target, "selected_model": requested}
@@ -1616,7 +1707,7 @@ def index() -> str:
         <h2>Modelos IA</h2>
         <div class="toolbar">
           <label>Buscar<input id="modelQuery" placeholder="deepseek, gpt, gemini..." oninput="debouncedLoadModels()" /></label>
-          <label>Perfil automatico<select id="modelAutoTarget"></select></label>
+          <label>Perfil a configurar<select id="modelAutoTarget" onchange="modelState.page = 1; loadModels()"></select></label>
           <button class="ghost" onclick="selectModel('auto', document.getElementById('modelAutoTarget').value)">Automatico</button>
           <button class="secondary" onclick="loadModels(true)">Actualizar catalogo</button>
           <label><input id="modelSortCost" type="checkbox" onchange="modelState.page = 1; loadModels()" /> menor coste</label>
@@ -1807,11 +1898,13 @@ const modelTargets = [
   ['classification', 'Clasificacion'],
   ['statistical_planning', 'Planificacion estadistica'],
   ['statistical_reasoning', 'Razonamiento estadistico'],
+  ['image_analysis', 'Analisis de imagenes'],
 ];
 function modelTargetOptions(selected = 'general') {
   return modelTargets.map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${label}</option>`).join('');
 }
 function money(v) { return v === null || v === undefined ? 'variable' : '$' + Number(v || 0).toFixed(3) + '/M'; }
+function costLabel(kind) { return kind === 'free' ? 'GRATIS' : (kind === 'paid' ? 'DE PAGO' : 'PRECIO NO VERIFICADO'); }
 function compactNumber(v) { return v ? Number(v).toLocaleString('es-ES') : '-'; }
 function setPage(name) {
   document.querySelectorAll('[data-page]').forEach(node => node.classList.toggle('active', node.dataset.page === name));
@@ -1940,11 +2033,14 @@ async function loadModels(refresh = false) {
   try {
     const query = document.getElementById('modelQuery').value || '';
     const sort = document.getElementById('modelSortCost').checked ? 'cost' : '';
-    const data = await requestJSON(`/api/models?page=${modelState.page}&page_size=50&query=${encodeURIComponent(query)}&sort=${sort}&refresh=${refresh ? 'true' : 'false'}`);
+    const activeTarget = document.getElementById('modelAutoTarget').value || 'general';
+    const data = await requestJSON(`/api/models?page=${modelState.page}&page_size=50&query=${encodeURIComponent(query)}&sort=${sort}&refresh=${refresh ? 'true' : 'false'}&target=${encodeURIComponent(activeTarget)}`);
     modelState.page = data.page;
     modelState.totalPages = data.total_pages;
     document.getElementById('modelAutoTarget').innerHTML = modelTargetOptions(document.getElementById('modelAutoTarget').value || 'general');
-    document.getElementById('modelSummary').textContent = `${data.total} modelos compatibles con chat y herramientas · cada perfil se configura por separado`;
+    document.getElementById('modelSummary').textContent = data.target === 'image_analysis'
+      ? `${data.total} modelos compatibles con entrada de imagen`
+      : `${data.total} modelos compatibles con chat y herramientas · cada perfil se configura por separado`;
     document.getElementById('modelProfiles').innerHTML = modelTargets.map(([target]) => {
       const profile = data.profiles[target];
       return `<span><strong>${html(profile.label)}</strong><br><span class="muted">${profile.automatic ? 'Automatico: ' : 'Seleccionado: '}${html(profile.effective_model)}</span></span>`;
@@ -1958,6 +2054,7 @@ async function loadModels(refresh = false) {
           <div class="model-meta">
             <span class="pill price">entrada ${money(m.input_price_per_million)}</span>
             <span class="pill price">salida ${money(m.output_price_per_million)}</span>
+            <span class="pill price">${costLabel(m.cost_class)}</span>
             <span class="pill">contexto ${compactNumber(m.context_length)}</span>
             ${m.configured ? '<span class="pill">configurado</span>' : ''}
             ${m.supports_structured_outputs ? '<span class="pill">JSON</span>' : ''}
@@ -1965,8 +2062,8 @@ async function loadModels(refresh = false) {
           </div>
         </div>
         <div class="row-actions">
-          <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions()}</select>
-          <button class="secondary" data-model="${html(m.id)}" onclick="selectModel(this.dataset.model, this.previousElementSibling.value)">Usar</button>
+          <select aria-label="Destino para ${html(m.id)}">${modelTargetOptions(data.target)}</select>
+          <button class="secondary" data-model="${html(m.id)}" data-cost="${m.cost_class}" onclick="selectModel(this.dataset.model, this.previousElementSibling.value, this.dataset.cost)">Usar</button>
         </div>
       </div>`).join('') : '<p class="muted">Sin modelos para ese filtro.</p>';
   } catch (err) {
@@ -1983,9 +2080,17 @@ async function changeModelPage(delta) {
   modelState.page = Math.max(1, Math.min(modelState.totalPages, modelState.page + delta));
   await loadModels();
 }
-async function selectModel(model, target = 'general') {
+async function selectModel(model, target = 'general', costClass = 'unknown') {
   try {
-    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model, target})});
+    let costAcknowledged = false;
+    if (target === 'image_analysis' && costClass !== 'free') {
+      const warning = costClass === 'paid'
+        ? `${model} es un modelo DE PAGO. ¿Quieres seleccionarlo para analizar imagenes?`
+        : `No se ha podido verificar el precio de ${model}. Podria generar costes. ¿Quieres seleccionarlo?`;
+      if (!window.confirm(warning)) return;
+      costAcknowledged = true;
+    }
+    const result = await requestJSON('/api/models/select', {method: 'POST', body: JSON.stringify({model, target, cost_acknowledged: costAcknowledged})});
     const label = (modelTargets.find(([value]) => value === target) || [target, target])[1];
     showNotice(result.selected_model ? `${label}: ${result.selected_model}` : `${label}: router automatico`);
     await loadModels();
