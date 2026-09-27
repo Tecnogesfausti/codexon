@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.11
+
+- Incluye OpenCode CLI (`opencode`) en la imagen para usarlo desde la terminal web y SSH.
+
 ## 0.3.5
 
 - Añade análisis multimodal de imágenes desde una pestaña propia del portal.

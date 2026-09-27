@@ -5,8 +5,9 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.3.5
+ARG BUILD_VERSION=0.3.11
 ARG CODEX_NPM_PACKAGE="@openai/codex"
+ARG OPENCODE_NPM_PACKAGE="opencode-ai"
 ARG ESPHOME_PIP_PACKAGE="esphome"
 
 LABEL \
@@ -60,7 +61,7 @@ COPY codexon/ /opt/codexon-src/
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
   && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
   && npm install --omit=dev --prefix /opt/codexon/whatsapp-core \
-  && npm install -g "${CODEX_NPM_PACKAGE}" \
+  && npm install -g "${CODEX_NPM_PACKAGE}" "${OPENCODE_NPM_PACKAGE}" \
   && npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-memory \
   && python3 -m venv /opt/esphome \
   && /opt/esphome/bin/pip install --no-cache-dir --upgrade pip wheel \
