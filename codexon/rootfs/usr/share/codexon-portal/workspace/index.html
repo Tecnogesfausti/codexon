@@ -39,7 +39,11 @@
     .workdir { color:var(--muted); font-size:.82rem; overflow-wrap:anywhere; }
     .model-line { display:flex; align-items:center; gap:8px; }
     .model-line label { color:var(--muted); white-space:nowrap; }
-    .model-line input { flex:1; width:100%; }
+    .model-line input { flex:0 1 190px; width:35%; }
+    .model-line select { flex:1; width:100%; }
+    .usage-bar { display:flex; gap:7px 16px; flex-wrap:wrap; color:var(--muted); font-size:.82rem; }
+    .usage-bar strong { color:var(--text); }
+    .usage-detail { color:var(--muted); font-size:.76rem; margin-top:8px; }
     .messages { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:13px; padding:18px; }
     .empty { margin:auto; text-align:center; color:var(--muted); max-width:420px; }
     .empty strong { color:var(--text); font-size:1.1rem; }
@@ -101,9 +105,10 @@
         <div id="workdir" class="workdir">Carpeta de trabajo: —</div>
         <div class="model-line">
           <label for="model">Modelo</label>
-          <input id="model" list="modelList" spellcheck="false" placeholder="openrouter/proveedor/modelo">
-          <datalist id="modelList"></datalist>
+          <input id="modelSearch" type="search" spellcheck="false" placeholder="Buscar modelo">
+          <select id="model" aria-label="Seleccionar modelo"><option value="openrouter/deepseek/deepseek-v4-flash-0731">openrouter/deepseek/deepseek-v4-flash-0731</option></select>
         </div>
+        <div id="usageBar" class="usage-bar" aria-live="polite"></div>
       </div>
       <div id="messages" class="messages" aria-live="polite"></div>
       <div class="compose">
@@ -117,6 +122,7 @@
           </div>
         </div>
         <div class="status">Sin marcar, OpenCode solo puede leer y buscar archivos. Marca la casilla para autorizar cambios en esta petición.</div>
+        <div id="exchangeInfo" class="usage-detail">Coste estimado con el cambio de referencia del BCE.</div>
         <div id="status" class="status"></div>
       </div>
     </section>
@@ -126,7 +132,7 @@
     const $ = id => document.getElementById(id);
     const state = {
       roots: [], path: '', parent: null, workdir: '', sessionId: null, runId: null,
-      messages: [], attachments: new Set(), assistantIndex: -1,
+      messages: [], attachments: new Set(), assistantIndex: -1, models: [], usdPerEur: null,
     };
     const saved = (() => { try { return JSON.parse(sessionStorage.getItem('codexonWorkspace') || '{}'); } catch { return {}; } })();
     state.sessionId = saved.sessionId || null;
@@ -134,7 +140,9 @@
     state.messages = Array.isArray(saved.messages) ? saved.messages.slice(-30) : [];
     state.runId = saved.runId || null;
     state.assistantIndex = state.messages.length - 1;
-    $('model').value = saved.model || 'openrouter/deepseek/deepseek-v4-flash-0731';
+    const preferredModel = saved.model || 'openrouter/deepseek/deepseek-v4-flash-0731';
+    state.models = [preferredModel];
+    $('model').replaceChildren(new Option(preferredModel, preferredModel));
 
     function remember() {
       sessionStorage.setItem('codexonWorkspace', JSON.stringify({
@@ -160,6 +168,35 @@
       const unit = bytes < 1048576 ? 'KB' : 'MB';
       const divisor = unit === 'KB' ? 1024 : 1048576;
       return (bytes / divisor).toFixed(bytes < divisor * 10 ? 1 : 0) + ' ' + unit;
+    }
+    const formatTokens = value => new Intl.NumberFormat('es-ES').format(value || 0);
+    function formatEuros(usd) {
+      if (usd == null || !state.usdPerEur) return '—';
+      const euros = usd / state.usdPerEur;
+      const decimals = euros < 0.0001 ? 6 : euros < 0.01 ? 4 : 2;
+      return new Intl.NumberFormat('es-ES', {style:'currency', currency:'EUR', minimumFractionDigits:decimals, maximumFractionDigits:decimals}).format(euros);
+    }
+    function renderUsage() {
+      const usages = state.messages.filter(message => message.role === 'assistant' && message.usage?.steps).map(message => message.usage);
+      const total = usages.reduce((sum, item) => sum + (item.total || 0), 0);
+      const cost = usages.reduce((sum, item) => sum + (item.cost_usd || 0), 0);
+      const priced = usages.some(item => item.cost_usd != null);
+      $('usageBar').replaceChildren();
+      const label = document.createElement('span');
+      label.textContent = 'Conversación: ' + formatTokens(total) + ' tokens · coste estimado ' + formatEuros(priced ? cost : null);
+      $('usageBar').append(label);
+    }
+    function renderModelOptions() {
+      const current = $('model').value || preferredModel;
+      const query = $('modelSearch').value.trim().toLowerCase();
+      const matches = state.models.filter(model => model.toLowerCase().includes(query));
+      const select = $('model'); select.replaceChildren();
+      for (const model of matches) select.add(new Option(model, model));
+      if (matches.includes(current)) select.value = current;
+      else if (matches.length) select.value = matches[0];
+      select.disabled = !matches.length;
+      if (!matches.length) select.add(new Option('No hay modelos coincidentes', ''));
+      remember();
     }
     function updateWorkdir() {
       $('workdir').textContent = 'Carpeta de trabajo: ' + (state.workdir || '—');
@@ -246,9 +283,18 @@
         const bubble = document.createElement('article'); bubble.className = 'message ' + message.role;
         const role = document.createElement('span'); role.className = 'role'; role.textContent = message.role === 'user' ? 'Tú' : 'OpenCode';
         const content = document.createElement('div'); content.textContent = message.content || '…';
-        bubble.append(role, content); holder.append(bubble);
+        bubble.append(role, content);
+        if (message.role === 'assistant' && message.usage?.steps) {
+          const usage = document.createElement('div'); usage.className = 'usage-detail';
+          usage.textContent = 'Esta respuesta: ' + formatTokens(message.usage.total) + ' tokens (' +
+            formatTokens(message.usage.input) + ' entrada · ' + formatTokens(message.usage.output) +
+            ' salida · ' + formatTokens(message.usage.cache_read) + ' caché) · ' + formatEuros(message.usage.cost_usd);
+          bubble.append(usage);
+        }
+        holder.append(bubble);
       }
       if (atBottom) holder.scrollTop = holder.scrollHeight;
+      renderUsage();
       remember();
     }
     function running(isRunning) {
@@ -263,6 +309,7 @@
         const run = await api('runs/' + state.runId);
         if (run.session_id) state.sessionId = run.session_id;
         state.messages[state.assistantIndex].content = run.output || (run.status === 'running' ? '…' : 'Sin respuesta de texto.');
+        state.messages[state.assistantIndex].usage = run.usage;
         $('status').textContent = run.activity + (run.error ? ' · ' + run.error : '');
         if (run.status !== 'running') {
           if (run.error) state.messages[state.assistantIndex].content += '\n\nError: ' + run.error;
@@ -303,9 +350,17 @@
     }
     async function loadModels() {
       try {
-        const result = await api('models'); const list = $('modelList'); list.replaceChildren();
-        for (const model of result.models) { const option = document.createElement('option'); option.value = model; list.append(option); }
-      } catch (error) { $('status').textContent = 'Escribe el identificador del modelo: ' + error.message; }
+        const result = await api('models');
+        state.models = [...new Set([preferredModel, ...result.models])].sort((a, b) => a.localeCompare(b));
+        renderModelOptions();
+      } catch (error) { $('status').textContent = 'No se pudo cargar el catálogo de modelos: ' + error.message; }
+    }
+    async function loadExchangeRate() {
+      try {
+        const result = await api('exchange-rate'); state.usdPerEur = result.usd_per_eur;
+        $('exchangeInfo').textContent = 'Coste estimado en euros · BCE ' + result.date + ' · 1 € = ' + result.usd_per_eur + ' USD';
+      } catch (error) { $('exchangeInfo').textContent = 'No disponible el cambio del BCE; el coste en euros se mostrará cuando vuelva a estar disponible.'; }
+      renderMessages();
     }
     async function init() {
       renderMessages(); updateWorkdir();
@@ -316,7 +371,7 @@
         if (!result.roots.length) throw new Error('No hay carpetas permitidas disponibles');
         if (!result.opencode_available) $('status').textContent = 'OpenCode no está instalado en la imagen activa.';
         await navigate(saved.path || result.default);
-        loadModels();
+        loadModels(); loadExchangeRate();
         if (state.runId && state.assistantIndex >= 0) { running(true); pollRun(); }
       } catch (error) { showToast(error.message, true); }
     }
@@ -334,6 +389,7 @@
     $('stopButton').onclick = async () => { if (state.runId) { try { await api('runs/' + state.runId, {method:'DELETE'}); } catch (error) { showToast(error.message, true); } } };
     $('prompt').onkeydown = event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); send(); } };
     $('model').onchange = remember;
+    $('modelSearch').oninput = renderModelOptions;
     init();
   </script>
 </body>

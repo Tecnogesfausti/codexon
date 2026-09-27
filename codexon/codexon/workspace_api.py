@@ -8,13 +8,16 @@ import os
 import re
 import shutil
 import signal
+import time
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+import httpx
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 
@@ -23,6 +26,7 @@ MAX_PROMPT_CHARS = 20_000
 MAX_OUTPUT_CHARS = 200_000
 MAX_RUNNING = 2
 RUNS: dict[str, "OpenCodeRun"] = {}
+EXCHANGE_RATE: dict[str, Any] = {"usd_per_eur": None, "date": None, "expires_at": 0.0}
 MODEL_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.:/+@-]{1,160}$")
 SESSION_PATTERN = re.compile(r"^ses_[a-zA-Z0-9_-]{4,120}$")
 
@@ -34,10 +38,12 @@ class OpenCodeRun:
     prompt: str
     model: str
     session_id: str | None
+    started_at_ms: int = field(default_factory=lambda: int(time.time() * 1000))
     status: str = "running"
     output: str = ""
     error: str = ""
     activity: str = "Iniciando OpenCode…"
+    usage: dict[str, Any] = field(default_factory=lambda: empty_usage())
     process: asyncio.subprocess.Process | None = field(default=None, repr=False)
 
     def public(self) -> dict[str, Any]:
@@ -51,7 +57,34 @@ class OpenCodeRun:
             "output": self.output,
             "error": self.error,
             "activity": self.activity,
+            "usage": self.usage,
         }
+
+
+def empty_usage() -> dict[str, Any]:
+    return {"input": 0, "output": 0, "reasoning": 0, "cache_read": 0,
+            "cache_write": 0, "total": 0, "cost_usd": None, "steps": 0}
+
+
+def add_usage(usage: dict[str, Any], part: dict[str, Any]) -> None:
+    tokens = part.get("tokens")
+    if not isinstance(tokens, dict):
+        return
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    for field_name, value in (("input", tokens.get("input")), ("output", tokens.get("output")),
+                              ("reasoning", tokens.get("reasoning")), ("cache_read", cache.get("read")),
+                              ("cache_write", cache.get("write"))):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            usage[field_name] += int(value)
+    total = tokens.get("total")
+    if isinstance(total, (int, float)) and not isinstance(total, bool) and total >= 0:
+        usage["total"] += int(total)
+    else:
+        usage["total"] = sum(usage[key] for key in ("input", "output", "cache_read", "cache_write"))
+    cost = part.get("cost")
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool) and cost >= 0:
+        usage["cost_usd"] = (usage["cost_usd"] or 0.0) + float(cost)
+    usage["steps"] += 1
 
 
 def workspace_roots() -> list[Path]:
@@ -219,6 +252,28 @@ async def api_models() -> dict[str, Any]:
     return {"models": models[:1000]}
 
 
+@router.get("/exchange-rate")
+async def api_exchange_rate() -> dict[str, Any]:
+    if time.time() < EXCHANGE_RATE["expires_at"]:
+        return {"usd_per_eur": EXCHANGE_RATE["usd_per_eur"], "date": EXCHANGE_RATE["date"]}
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.get("https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml")
+            response.raise_for_status()
+        root = ET.fromstring(response.content)
+        dated = next(node for node in root.iter() if "time" in node.attrib)
+        usd = next(node for node in dated.iter() if node.attrib.get("currency") == "USD")
+        rate = float(usd.attrib["rate"])
+        if not 0.1 < rate < 10:
+            raise ValueError("Tipo de cambio fuera de rango")
+        EXCHANGE_RATE.update(usd_per_eur=rate, date=dated.attrib["time"], expires_at=time.time() + 12 * 3600)
+    except (httpx.HTTPError, ET.ParseError, StopIteration, KeyError, ValueError):
+        if EXCHANGE_RATE["usd_per_eur"] is None:
+            raise HTTPException(status_code=503, detail="No se pudo consultar el cambio EUR/USD del BCE")
+        EXCHANGE_RATE["expires_at"] = time.time() + 3600
+    return {"usd_per_eur": EXCHANGE_RATE["usd_per_eur"], "date": EXCHANGE_RATE["date"]}
+
+
 def command_for_run(run: OpenCodeRun, files: list[str], allow_actions: bool) -> list[str]:
     binary = shutil.which("opencode")
     if binary is None:
@@ -283,6 +338,58 @@ def absorb_event(run: OpenCodeRun, line: bytes) -> None:
     elif event_type == "error":
         error = event.get("error")
         run.error = str(error)[-4000:]
+    if event_type == "step_finish" or part.get("type") == "step-finish":
+        add_usage(run.usage, part)
+
+
+async def reconcile_usage(run: OpenCodeRun) -> None:
+    """Use saved step parts because the CLI stream can omit its final step."""
+    if not run.session_id:
+        return
+    binary = shutil.which("opencode")
+    if binary is None:
+        return
+    process: asyncio.subprocess.Process | None = None
+    try:
+        process = await asyncio.create_subprocess_exec(
+            binary, "export", "--sanitize", run.session_id,
+            cwd=run.directory, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            env=environment_for_run(False),
+        )
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=20)
+        if process.returncode or len(stdout) > 20 * 1024 * 1024:
+            return
+        data = json.loads(stdout)
+        messages = data.get("messages") if isinstance(data, dict) else None
+        if not isinstance(messages, list):
+            return
+        usage = empty_usage()
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            info = message.get("info")
+            if not isinstance(info, dict) or info.get("role") != "assistant":
+                continue
+            timing = info.get("time")
+            created = timing.get("created") if isinstance(timing, dict) else None
+            if not isinstance(created, (int, float)) or created < run.started_at_ms - 1000:
+                continue
+            for part in message.get("parts") or []:
+                if isinstance(part, dict) and part.get("type") == "step-finish":
+                    add_usage(usage, part)
+        if usage["steps"]:
+            run.usage = usage
+    except (asyncio.TimeoutError, json.JSONDecodeError, UnicodeError, OSError, TypeError, AttributeError):
+        if process and process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
+    except asyncio.CancelledError:
+        if process and process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
+        raise
 
 
 async def execute_run(run: OpenCodeRun, files: list[str], allow_actions: bool) -> None:
@@ -326,6 +433,7 @@ async def execute_run(run: OpenCodeRun, files: list[str], allow_actions: bool) -
             stderr = await stderr_task
         if run.status == "cancelled":
             return
+        await reconcile_usage(run)
         if process.returncode == 0:
             run.status = "done"
             run.activity = "Terminado"

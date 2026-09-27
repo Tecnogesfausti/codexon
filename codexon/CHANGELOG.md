@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.13
+
+- El explorador de OpenCode permite buscar y elegir un modelo del catálogo de OpenRouter.
+- Muestra los tokens y el coste estimado por respuesta y por conversación; convierte el coste informado por OpenCode a euros con el cambio de referencia del BCE.
+
 ## 0.3.12
 
 - Añade una pestaña de Archivos y OpenCode al portal: navegación entre carpetas permitidas, creación de carpetas, subida y descarga de archivos, adjuntos y conversación con OpenCode en la carpeta de trabajo elegida.

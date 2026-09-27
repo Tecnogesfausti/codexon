@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -10,8 +11,9 @@ from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import httpx
 
-from workspace_api import RUNS, OpenCodeRun, absorb_event, command_for_run, environment_for_run, router
+from workspace_api import EXCHANGE_RATE, RUNS, OpenCodeRun, absorb_event, command_for_run, environment_for_run, reconcile_usage, router
 
 
 class WorkspaceApiTest(unittest.TestCase):
@@ -28,6 +30,7 @@ class WorkspaceApiTest(unittest.TestCase):
         self.app = app
         self.client = TestClient(app)
         RUNS.clear()
+        EXCHANGE_RATE.update(usd_per_eur=None, date=None, expires_at=0.0)
 
     def tearDown(self) -> None:
         self.client.close()
@@ -83,6 +86,51 @@ class WorkspaceApiTest(unittest.TestCase):
         absorb_event(run, b'{"type":"text","sessionID":"ses_12345","part":{"type":"text","text":"Respuesta"}}')
         self.assertEqual(run.session_id, "ses_12345")
         self.assertEqual(run.output, "Respuesta")
+
+    def test_step_finish_counts_tokens_and_provider_cost(self) -> None:
+        run = OpenCodeRun("run-1", str(self.root), "hola", "openrouter/example/model", None)
+        absorb_event(run, json.dumps({"type": "step_finish", "part": {
+            "type": "step-finish", "tokens": {"total": 140, "input": 80, "output": 20,
+                "reasoning": 5, "cache": {"read": 40, "write": 0}}, "cost": 0.012,
+        }}).encode())
+        self.assertEqual(run.usage["total"], 140)
+        self.assertEqual(run.usage["cache_read"], 40)
+        self.assertEqual(run.usage["cost_usd"], 0.012)
+
+    def test_export_recovers_final_step_missing_from_stream(self) -> None:
+        run = OpenCodeRun("run-1", str(self.root), "hola", "openrouter/example/model", "ses_12345")
+        absorb_event(run, json.dumps({"type": "step_finish", "part": {
+            "type": "step-finish", "tokens": {"total": 100, "input": 80, "output": 20}, "cost": 0.01,
+        }}).encode())
+        saved = {"messages": [{"info": {"role": "assistant", "time": {"created": run.started_at_ms}},
+            "parts": [
+                {"type": "step-finish", "tokens": {"total": 100, "input": 80, "output": 20}, "cost": 0.01},
+                {"type": "step-finish", "tokens": {"total": 50, "input": 30, "output": 20}, "cost": 0.02},
+            ]}]}
+        fake = Path(self.tempdir.name) / "fake-export"
+        fake.write_text("#!/usr/bin/env python3\nimport json\nprint(json.dumps(" + repr(saved) + "))\n", encoding="utf-8")
+        fake.chmod(0o755)
+        with patch("workspace_api.shutil.which", return_value=str(fake)):
+            asyncio.run(reconcile_usage(run))
+        self.assertEqual(run.usage["total"], 150)
+        self.assertAlmostEqual(run.usage["cost_usd"], 0.03)
+
+    def test_exchange_rate_reads_ecb_usd_reference(self) -> None:
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url):
+                xml = b"<Envelope><Cube><Cube time='2026-09-25'><Cube currency='USD' rate='1.1403'/></Cube></Cube></Envelope>"
+                return httpx.Response(200, content=xml, request=httpx.Request("GET", url))
+
+        with patch("workspace_api.httpx.AsyncClient", return_value=FakeClient()):
+            response = self.client.get("/api/workspace/exchange-rate")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"usd_per_eur": 1.1403, "date": "2026-09-25"})
 
     def test_unchecked_prompt_denies_changes_and_commands(self) -> None:
         environment = environment_for_run(False)
