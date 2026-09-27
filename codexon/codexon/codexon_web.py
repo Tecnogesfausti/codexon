@@ -30,6 +30,7 @@ from services.live_context.manager import LiveContextManager
 from services.image_analysis import analyze_image
 from tools.registry import builtin_tool_names
 from codexon import DEFAULT_MODEL_ROUTES, ModelRouter, fetch_openrouter_model_catalog
+from workspace_api import router as workspace_router
 
 try:
     import httpx
@@ -68,7 +69,8 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.10")
+app = FastAPI(title="Codexon", version="0.3.12")
+app.include_router(workspace_router)
 
 
 @app.middleware("http")

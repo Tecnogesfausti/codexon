@@ -8,6 +8,8 @@ El add-on usa Ingress y aparece en la barra lateral de Home Assistant como **Cod
 
 La terminal continúa siendo `ttyd + tmux`: conserva la edición interactiva, las teclas especiales, el historial y la sesión al cambiar de pestaña o reconectar.
 
+La pestaña **Archivos y OpenCode** permite navegar las rutas de `codexon_fs_roots`, crear carpetas, subir archivos de hasta 100 MB, descargar archivos y adjuntarlos a un prompt. Elige un modelo de OpenRouter, escribe el prompt y pulsa **Enviar**. OpenCode ejecuta cada petición desde la carpeta de trabajo mostrada; **Nueva conversación aquí** usa la carpeta que estás explorando. Sin marcar **Permitir comandos y cambios**, OpenCode solo puede leer y buscar archivos. Al marcarla, se autorizan comandos y modificaciones durante esa petición. El panel se sirve por Ingress y necesita `codexon_web_enabled: true`.
+
 Desde ese panel puedes ejecutar:
 
 ```sh
@@ -159,7 +161,7 @@ tail -f /data/codexon/codexon-service.log
 tail -f /data/codexon/codexon-runtime.log
 ```
 
-El add-on expone un único servidor web por Ingress `8099`. Dentro del contenedor, el portal envía `/stats/` a Codexon y `/terminal/` a ttyd; esos servicios internos sólo escuchan en `127.0.0.1` y no publican puertos adicionales. La opción antigua `ingress_target` se conserva únicamente para que las configuraciones instaladas sigan siendo válidas, pero ya no altera el panel ni los puertos.
+El add-on expone un único servidor web por Ingress `8099`. Dentro del contenedor, el portal envía `/stats/` a Codexon, `/workspace/` a la nueva pestaña de archivos y OpenCode, y `/terminal/` a ttyd; los servicios internos sólo escuchan en `127.0.0.1` y no publican puertos adicionales. La opción antigua `ingress_target` se conserva únicamente para que las configuraciones instaladas sigan siendo válidas, pero ya no altera el panel ni los puertos.
 
 Desde la terminal Codex puedes controlar el servicio real sin arrancar otro `codexon.py`:
 

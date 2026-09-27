@@ -35,10 +35,12 @@
   <header>
     <div class="brand">Codexon</div>
     <button type="button" data-view="stats" class="active">Estadísticas</button>
+    <button type="button" data-view="workspace">Archivos y OpenCode</button>
     <button type="button" data-view="terminal">Terminal</button>
   </header>
   <main>
     <iframe id="stats" class="active" src="./stats/" title="Estadísticas Codexon"></iframe>
+    <iframe id="workspace" src="./workspace/" title="Archivos y OpenCode" allow="clipboard-read; clipboard-write"></iframe>
     <iframe id="terminal" src="./terminal/" title="Terminal Codex" allow="clipboard-read; clipboard-write" allowfullscreen></iframe>
   </main>
   <script>
@@ -53,7 +55,7 @@
       }
     }
     document.querySelectorAll('button[data-view]').forEach(button => button.addEventListener('click', () => selectView(button.dataset.view)));
-    selectView(location.hash === '#terminal' ? 'terminal' : 'stats');
+    selectView(['stats', 'workspace', 'terminal'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'stats');
   </script>
 </body>
 </html>

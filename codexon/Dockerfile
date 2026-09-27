@@ -5,7 +5,7 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.3.11
+ARG BUILD_VERSION=0.3.12
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG OPENCODE_NPM_PACKAGE="opencode-ai"
 ARG ESPHOME_PIP_PACKAGE="esphome"

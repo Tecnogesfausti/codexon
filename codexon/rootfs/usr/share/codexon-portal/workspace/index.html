@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Archivos y OpenCode · Codexon</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#111827; --raised:#192336; --line:#2c3a50; --text:#e5e7eb; --muted:#a7b4c7; --accent:#f97316; --good:#34d399; --bad:#fca5a5; }
+    * { box-sizing:border-box; }
+    html,body { width:100%; height:100%; margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui,sans-serif; }
+    body { display:grid; grid-template-rows:minmax(0,1fr); }
+    button,input,textarea,select { font:inherit; }
+    button { border:1px solid var(--line); border-radius:8px; color:var(--text); background:var(--raised); padding:8px 11px; cursor:pointer; }
+    button:hover { border-color:var(--accent); }
+    button:disabled { opacity:.45; cursor:default; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#1c1109; font-weight:750; }
+    input,textarea,select { border:1px solid var(--line); border-radius:8px; background:#0e1728; color:var(--text); padding:9px; min-width:0; }
+    .layout { display:grid; grid-template-columns:minmax(280px,340px) minmax(0,1fr); min-height:0; }
+    aside { display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; min-height:0; border-right:1px solid var(--line); background:var(--panel); }
+    .sidebar-head { padding:14px; border-bottom:1px solid var(--line); }
+    .sidebar-head h1 { margin:0 0 10px; font-size:1rem; }
+    .sidebar-head select { width:100%; }
+    .toolbar { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+    .sidebar-toolbar { padding:10px 14px; border-bottom:1px solid var(--line); }
+    .breadcrumb { min-height:32px; padding:8px 14px; color:var(--muted); overflow-wrap:anywhere; border-bottom:1px solid var(--line); font-size:.83rem; }
+    .entries { min-height:0; overflow:auto; padding:5px 7px 14px; }
+    .entry { display:grid; grid-template-columns:24px minmax(0,1fr) auto; align-items:center; gap:7px; border-radius:8px; padding:7px; }
+    .entry:hover { background:#1c2940; }
+    .entry-main { min-width:0; border:0; text-align:left; background:none; padding:3px 0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500; }
+    .entry-main:hover { border:0; color:var(--accent); }
+    .entry small { color:var(--muted); font-size:.72rem; }
+    .entry button.action { padding:5px 7px; min-height:28px; font-size:.75rem; }
+    .entry-actions { display:flex; gap:4px; }
+    .sidebar-foot { padding:11px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:.82rem; }
+    .chat { min-width:0; min-height:0; display:grid; grid-template-rows:auto minmax(0,1fr) auto; }
+    .chat-head { padding:12px 16px; border-bottom:1px solid var(--line); background:var(--panel); display:grid; gap:8px; }
+    .chat-title { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .chat-title h2 { margin:0; font-size:1.05rem; }
+    .workdir { color:var(--muted); font-size:.82rem; overflow-wrap:anywhere; }
+    .model-line { display:flex; align-items:center; gap:8px; }
+    .model-line label { color:var(--muted); white-space:nowrap; }
+    .model-line input { flex:1; width:100%; }
+    .messages { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:13px; padding:18px; }
+    .empty { margin:auto; text-align:center; color:var(--muted); max-width:420px; }
+    .empty strong { color:var(--text); font-size:1.1rem; }
+    .message { max-width:min(850px,94%); border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:12px 14px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .message.user { align-self:flex-end; border-color:#9a511e; background:#332217; }
+    .message.assistant { align-self:flex-start; }
+    .message .role { display:block; margin-bottom:6px; color:var(--muted); font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; }
+    .message.assistant .role { color:var(--accent); }
+    .compose { border-top:1px solid var(--line); background:var(--panel); padding:12px 16px 16px; }
+    .compose textarea { width:100%; min-height:88px; max-height:260px; resize:vertical; }
+    .compose-bottom { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .compose-bottom label { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:.83rem; }
+    .compose-bottom label input { width:auto; }
+    .compose-actions { display:flex; gap:7px; }
+    .attachment-list { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+    .attachment { border:1px solid var(--line); border-radius:999px; padding:4px 8px; font-size:.8rem; color:var(--text); }
+    .attachment button { border:0; background:transparent; padding:0 0 0 7px; color:var(--bad); }
+    .status { min-height:20px; margin-top:7px; color:var(--muted); font-size:.82rem; }
+    .toast { position:fixed; left:50%; bottom:16px; transform:translateX(-50%); max-width:min(92vw,700px); z-index:5; border:1px solid var(--line); border-radius:9px; padding:10px 14px; background:#18263a; box-shadow:0 8px 30px #0008; display:none; }
+    .toast.error { border-color:#a63434; color:var(--bad); }
+    @media (max-width:760px) {
+      .layout { grid-template-columns:1fr; grid-template-rows:minmax(210px,38vh) minmax(0,1fr); }
+      aside { border-right:0; border-bottom:1px solid var(--line); }
+      .sidebar-head { padding:9px 12px; }
+      .sidebar-toolbar { padding:7px 12px; }
+      .breadcrumb { padding:5px 12px; min-height:0; }
+      .sidebar-foot { display:none; }
+      .messages { padding:10px; }
+      .compose { padding:9px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside aria-label="Explorador de archivos">
+      <div class="sidebar-head">
+        <h1>Archivos</h1>
+        <select id="rootSelect" aria-label="Carpeta raíz"></select>
+      </div>
+      <div>
+        <div class="sidebar-toolbar toolbar">
+          <button id="upButton" title="Subir a la carpeta superior">↑</button>
+          <button id="newFolderButton">Nueva carpeta</button>
+          <button id="uploadButton">Subir archivos</button>
+          <input id="uploadInput" type="file" multiple hidden>
+        </div>
+        <div id="breadcrumb" class="breadcrumb"></div>
+      </div>
+      <div id="entries" class="entries"></div>
+      <div class="sidebar-foot">Explora las carpetas configuradas en Codexon. Adjunta archivos al prompt desde la lista.</div>
+    </aside>
+
+    <section class="chat" aria-label="Conversación con OpenCode">
+      <div class="chat-head">
+        <div class="chat-title">
+          <h2>OpenCode</h2>
+          <button id="newChatButton">Nueva conversación aquí</button>
+        </div>
+        <div id="workdir" class="workdir">Carpeta de trabajo: —</div>
+        <div class="model-line">
+          <label for="model">Modelo</label>
+          <input id="model" list="modelList" spellcheck="false" placeholder="openrouter/proveedor/modelo">
+          <datalist id="modelList"></datalist>
+        </div>
+      </div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <div class="compose">
+        <div id="attachments" class="attachment-list"></div>
+        <textarea id="prompt" placeholder="Escribe lo que quieres hacer en esta carpeta… (Ctrl+Enter para enviar)"></textarea>
+        <div class="compose-bottom">
+          <label title="OpenCode podrá ejecutar comandos y modificar archivos en esta ejecución"><input id="allowActions" type="checkbox"> Permitir comandos y cambios</label>
+          <div class="compose-actions">
+            <button id="stopButton" disabled>Detener</button>
+            <button id="sendButton" class="primary">Enviar</button>
+          </div>
+        </div>
+        <div class="status">Sin marcar, OpenCode solo puede leer y buscar archivos. Marca la casilla para autorizar cambios en esta petición.</div>
+        <div id="status" class="status"></div>
+      </div>
+    </section>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+  <script>
+    const $ = id => document.getElementById(id);
+    const state = {
+      roots: [], path: '', parent: null, workdir: '', sessionId: null, runId: null,
+      messages: [], attachments: new Set(), assistantIndex: -1,
+    };
+    const saved = (() => { try { return JSON.parse(sessionStorage.getItem('codexonWorkspace') || '{}'); } catch { return {}; } })();
+    state.sessionId = saved.sessionId || null;
+    state.workdir = saved.workdir || '';
+    state.messages = Array.isArray(saved.messages) ? saved.messages.slice(-30) : [];
+    state.runId = saved.runId || null;
+    state.assistantIndex = state.messages.length - 1;
+    $('model').value = saved.model || 'openrouter/deepseek/deepseek-v4-flash-0731';
+
+    function remember() {
+      sessionStorage.setItem('codexonWorkspace', JSON.stringify({
+        sessionId: state.sessionId, workdir: state.workdir, path: state.path, runId: state.runId,
+        messages: state.messages.slice(-30), model: $('model').value,
+      }));
+    }
+    function showToast(message, error = false) {
+      const toast = $('toast'); toast.textContent = message; toast.className = 'toast' + (error ? ' error' : '');
+      toast.style.display = 'block'; clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => { toast.style.display = 'none'; }, 5500);
+    }
+    async function api(path, options = {}) {
+      const response = await fetch('./api/' + path, options);
+      const contentType = response.headers.get('content-type') || '';
+      const body = contentType.includes('json') ? await response.json() : null;
+      if (!response.ok) throw new Error(body?.detail || 'Error HTTP ' + response.status);
+      return body;
+    }
+    function formatBytes(bytes) {
+      if (bytes == null) return '';
+      if (bytes < 1024) return bytes + ' B';
+      const unit = bytes < 1048576 ? 'KB' : 'MB';
+      const divisor = unit === 'KB' ? 1024 : 1048576;
+      return (bytes / divisor).toFixed(bytes < divisor * 10 ? 1 : 0) + ' ' + unit;
+    }
+    function updateWorkdir() {
+      $('workdir').textContent = 'Carpeta de trabajo: ' + (state.workdir || '—');
+      $('newChatButton').disabled = !state.path;
+    }
+    async function navigate(path) {
+      try {
+        const result = await api('files?' + new URLSearchParams({path}));
+        state.path = result.path; state.parent = result.parent;
+        if (!state.workdir) state.workdir = state.path;
+        $('breadcrumb').textContent = result.path;
+        $('upButton').disabled = !result.parent;
+        const rootSelect = $('rootSelect');
+        rootSelect.value = result.root;
+        const entries = $('entries'); entries.replaceChildren();
+        if (!result.entries.length) {
+          const empty = document.createElement('p'); empty.textContent = 'Carpeta vacía'; empty.style.color = 'var(--muted)'; empty.style.padding = '8px'; entries.append(empty);
+        }
+        for (const item of result.entries) entries.append(makeEntry(item));
+        updateWorkdir(); remember();
+      } catch (error) { showToast(error.message, true); }
+    }
+    function makeEntry(item) {
+      const row = document.createElement('div'); row.className = 'entry';
+      const icon = document.createElement('span'); icon.textContent = item.kind === 'directory' ? '📁' : '📄';
+      const main = document.createElement('button'); main.className = 'entry-main'; main.textContent = item.name; main.title = item.path;
+      main.onclick = () => item.kind === 'directory' ? navigate(item.path) : toggleAttachment(item.path);
+      const actions = document.createElement('div'); actions.className = 'entry-actions';
+      if (item.kind === 'file') {
+        const attach = document.createElement('button'); attach.className = 'action'; attach.textContent = state.attachments.has(item.path) ? '✓' : 'Adjuntar';
+        attach.title = 'Añadir o quitar del siguiente prompt'; attach.onclick = () => toggleAttachment(item.path); actions.append(attach);
+        const download = document.createElement('button'); download.className = 'action'; download.textContent = '↓';
+        download.title = 'Descargar ' + item.name;
+        download.onclick = () => { window.location.href = './api/download?' + new URLSearchParams({path:item.path}); };
+        actions.append(download);
+      } else {
+        const label = document.createElement('small'); label.textContent = 'Abrir'; actions.append(label);
+      }
+      row.append(icon, main, actions); return row;
+    }
+    function toggleAttachment(path) {
+      if (state.attachments.has(path)) state.attachments.delete(path);
+      else if (state.attachments.size < 10) state.attachments.add(path);
+      else return showToast('Puedes adjuntar hasta 10 archivos', true);
+      renderAttachments(); navigate(state.path);
+    }
+    function renderAttachments() {
+      const holder = $('attachments'); holder.replaceChildren();
+      for (const path of state.attachments) {
+        const chip = document.createElement('span'); chip.className = 'attachment'; chip.textContent = path.split('/').pop(); chip.title = path;
+        const remove = document.createElement('button'); remove.textContent = '×'; remove.title = 'Quitar adjunto'; remove.onclick = () => toggleAttachment(path);
+        chip.append(remove); holder.append(chip);
+      }
+    }
+    async function uploadFiles(files) {
+      for (const file of files) {
+        if (file.size > 100 * 1024 * 1024) { showToast(file.name + ' supera los 100 MB', true); continue; }
+        const query = new URLSearchParams({directory: state.path, filename: file.name});
+        $('status').textContent = 'Subiendo ' + file.name + '…';
+        try {
+          let response = await fetch('./api/upload?' + query, {method:'PUT', body:file});
+          if (response.status === 409 && confirm('Ya existe ' + file.name + '. ¿Sobrescribirlo?')) {
+            query.set('overwrite','true');
+            response = await fetch('./api/upload?' + query, {method:'PUT', body:file});
+          }
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({})); throw new Error(body.detail || 'No se pudo subir ' + file.name);
+          }
+          showToast('Subido: ' + file.name);
+        } catch (error) { showToast(error.message, true); }
+      }
+      $('status').textContent = ''; await navigate(state.path);
+    }
+    function renderMessages() {
+      const holder = $('messages'); const atBottom = holder.scrollHeight - holder.scrollTop - holder.clientHeight < 90;
+      holder.replaceChildren();
+      if (!state.messages.length) {
+        const empty = document.createElement('div'); empty.className = 'empty';
+        const title = document.createElement('strong'); title.textContent = 'Trabaja con los archivos de esta carpeta';
+        const detail = document.createElement('p'); detail.textContent = 'Elige un modelo, escribe tu petición y adjunta archivos si los necesitas.';
+        empty.append(title, detail); holder.append(empty);
+      }
+      for (const message of state.messages) {
+        const bubble = document.createElement('article'); bubble.className = 'message ' + message.role;
+        const role = document.createElement('span'); role.className = 'role'; role.textContent = message.role === 'user' ? 'Tú' : 'OpenCode';
+        const content = document.createElement('div'); content.textContent = message.content || '…';
+        bubble.append(role, content); holder.append(bubble);
+      }
+      if (atBottom) holder.scrollTop = holder.scrollHeight;
+      remember();
+    }
+    function running(isRunning) {
+      $('sendButton').disabled = isRunning;
+      $('stopButton').disabled = !isRunning;
+      $('prompt').disabled = isRunning;
+      $('newChatButton').disabled = isRunning;
+    }
+    async function pollRun() {
+      if (!state.runId) return;
+      try {
+        const run = await api('runs/' + state.runId);
+        if (run.session_id) state.sessionId = run.session_id;
+        state.messages[state.assistantIndex].content = run.output || (run.status === 'running' ? '…' : 'Sin respuesta de texto.');
+        $('status').textContent = run.activity + (run.error ? ' · ' + run.error : '');
+        if (run.status !== 'running') {
+          if (run.error) state.messages[state.assistantIndex].content += '\n\nError: ' + run.error;
+          state.runId = null; running(false); await navigate(state.path);
+        }
+        renderMessages();
+        if (state.runId) setTimeout(pollRun, 900);
+      } catch (error) {
+        $('status').textContent = error.message;
+        state.runId = null; running(false); showToast(error.message, true);
+      }
+    }
+    async function send() {
+      const prompt = $('prompt').value.trim(); const model = $('model').value.trim();
+      if (!prompt) return showToast('Escribe una petición', true);
+      if (!model.includes('/')) return showToast('Elige un modelo con formato proveedor/modelo', true);
+      if (!state.workdir) return showToast('Elige una carpeta de trabajo', true);
+      const files = [...state.attachments];
+      state.messages.push({role:'user',content:prompt + (files.length ? '\n\nAdjuntos: ' + files.map(x => x.split('/').pop()).join(', ') : '')});
+      state.messages.push({role:'assistant',content:'…'}); state.assistantIndex = state.messages.length - 1;
+      $('prompt').value = ''; renderMessages(); running(true); $('status').textContent = 'Iniciando OpenCode…';
+      try {
+        const run = await api('runs', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+          prompt, model, directory:state.workdir, session_id:state.sessionId,
+          files, allow_actions:$('allowActions').checked,
+        })});
+        state.runId = run.id; state.attachments.clear(); renderAttachments(); await navigate(state.path); pollRun();
+        $('allowActions').checked = false;
+      } catch (error) {
+        state.messages[state.assistantIndex].content = 'No se pudo iniciar: ' + error.message;
+        renderMessages(); running(false); $('status').textContent = ''; showToast(error.message, true);
+      }
+    }
+    function newConversation() {
+      if (state.runId) return;
+      state.sessionId = null; state.workdir = state.path; state.messages = []; state.attachments.clear();
+      $('status').textContent = ''; updateWorkdir(); renderAttachments(); renderMessages();
+    }
+    async function loadModels() {
+      try {
+        const result = await api('models'); const list = $('modelList'); list.replaceChildren();
+        for (const model of result.models) { const option = document.createElement('option'); option.value = model; list.append(option); }
+      } catch (error) { $('status').textContent = 'Escribe el identificador del modelo: ' + error.message; }
+    }
+    async function init() {
+      renderMessages(); updateWorkdir();
+      try {
+        const result = await api('roots'); state.roots = result.roots;
+        const select = $('rootSelect'); select.replaceChildren();
+        for (const root of result.roots) { const option = document.createElement('option'); option.value = root.path; option.textContent = root.name; select.append(option); }
+        if (!result.roots.length) throw new Error('No hay carpetas permitidas disponibles');
+        if (!result.opencode_available) $('status').textContent = 'OpenCode no está instalado en la imagen activa.';
+        await navigate(saved.path || result.default);
+        loadModels();
+        if (state.runId && state.assistantIndex >= 0) { running(true); pollRun(); }
+      } catch (error) { showToast(error.message, true); }
+    }
+    $('rootSelect').onchange = event => navigate(event.target.value);
+    $('upButton').onclick = () => state.parent && navigate(state.parent);
+    $('newFolderButton').onclick = async () => {
+      const name = window.prompt('Nombre de la nueva carpeta:'); if (!name) return;
+      try { await api('folders', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({directory:state.path,name})}); await navigate(state.path); }
+      catch (error) { showToast(error.message, true); }
+    };
+    $('uploadButton').onclick = () => $('uploadInput').click();
+    $('uploadInput').onchange = event => { uploadFiles([...event.target.files]); event.target.value = ''; };
+    $('newChatButton').onclick = newConversation;
+    $('sendButton').onclick = send;
+    $('stopButton').onclick = async () => { if (state.runId) { try { await api('runs/' + state.runId, {method:'DELETE'}); } catch (error) { showToast(error.message, true); } } };
+    $('prompt').onkeydown = event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); send(); } };
+    $('model').onchange = remember;
+    init();
+  </script>
+</body>
+</html>

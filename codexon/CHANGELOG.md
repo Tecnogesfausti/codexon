@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.12
+
+- Añade una pestaña de Archivos y OpenCode al portal: navegación entre carpetas permitidas, creación de carpetas, subida y descarga de archivos, adjuntos y conversación con OpenCode en la carpeta de trabajo elegida.
+- Las ejecuciones muestran progreso, pueden cancelarse y continúan la sesión de OpenCode; la subida limita cada archivo a 100 MB.
+
 ## 0.3.11
 
 - Incluye OpenCode CLI (`opencode`) en la imagen para usarlo desde la terminal web y SSH.
