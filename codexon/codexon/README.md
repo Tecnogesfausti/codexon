@@ -448,6 +448,8 @@ mcp_server_url: "http://supervisor/core/api/mcp"
 
 El add-on exporta `CODEX_MODEL`, `CODEX_HOME` y `WORKSPACE`, y crea esos directorios al arrancar. `workspace` es el sitio recomendado para clonar el repo Codexon y dejar que Codex modifique codigo, haga commits y prepare backups.
 
+Desde 0.3.20 basta escribir `codex` en la terminal web: la función de la consola selecciona `WORKSPACE`, habilita la red del sandbox `workspace-write` y permite solicitar aprobación para permisos adicionales. También se generan estos valores en `/data/codex/config.toml` al arrancar. Tras actualizar, sal del proceso Codex con `/quit` y de la consola con `exit`, y vuelve a abrir la terminal web para cargar la función nueva. Una política administrada puede limitar los permisos; argumentos explícitos posteriores pueden cambiar los valores de la función.
+
 ### Backup cifrado de memoria
 
 Codexon puede crear un backup de reconstruccion que incluye memoria SQLite, tareas, observaciones, configuracion de agentes, agentes vivos, contexto Codex, notas y logs. Desde la UI usa **Backups** o llama `POST /api/backup`.

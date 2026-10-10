@@ -136,6 +136,11 @@ fi
 
 cat > "$CODEX_HOME/config.toml" <<'EOF'
 cli_auth_credentials_store = "file"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
 EOF
 
 cat > "$CODEX_HOME/AGENTS.md" <<'EOF'
@@ -280,7 +285,7 @@ ESPHome: $(esphome-version-check 2>/dev/null || true)
 Useful commands:
   Open the Codexon sidebar panel for a web terminal.
   codex-login-chatgpt
-  codex --model "${CODEX_MODEL}" "${WORKSPACE}"
+  codex
   ha-states
   ha-services
   ha-api GET /config

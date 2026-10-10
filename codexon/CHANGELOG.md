@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.20
+
+- Un simple `codex` en la terminal web abre el workspace configurado con estos permisos, incluso si existe una configuración de proyecto antigua; los argumentos explícitos permiten cambiarlos.
+- Configura Codex CLI con red habilitada en el sandbox `workspace-write`, para consultar Home Assistant y acceder a ESPHome desde la terminal.
+- Habilita la solicitud de aprobación para operaciones que requieren permisos adicionales.
+- Aplica estos ajustes al arrancar el complemento, tanto en instalaciones nuevas como al actualizar; las sesiones abiertas deben cerrarse y abrirse de nuevo.
+
 ## 0.3.19
 
 - Añade botones Copiar, Pegar y Ver texto en la terminal web, con texto seleccionable para móviles y navegadores que bloquean el portapapeles.
