@@ -275,14 +275,14 @@ Activa `codexon_whatsapp_enabled` y reinicia el add-on. En el primer arranque,
 abre el panel existente de Codexon y vincula WhatsApp con el QR de la sección
 **WhatsApp**. La sesión queda persistida en `/data/codexon/whatsapp/auth`.
 
-`codexon_whatsapp_allowed_senders` es opcional. Vacío acepta mensajes privados
-de cualquier remitente; si se rellena, solo acepta esos números internacionales
-sin necesidad del signo `+`. `codexon_whatsapp_wake_words` permite exigir una
+`codexon_whatsapp_allowed_senders` debe contener los números autorizados.
+Vacío rechaza todas las órdenes; usa números internacionales sin necesidad
+del signo `+`. `codexon_whatsapp_wake_words` permite exigir una
 de varias palabras de activación separadas por `|`, por ejemplo
 `casa|huerto|asistente|ia|robot`. No distingue mayúsculas ni acentos y elimina
-la palabra antes de entregar la orden. Los grupos y los mensajes enviados por
-la propia cuenta se aceptan siempre; no necesitan opciones separadas en la
-configuración del add-on. Las palabras de activación siguen aplicándose antes
+la palabra antes de entregar la orden. Las órdenes de grupos se rechazan.
+Los mensajes enviados por la propia cuenta requieren también un número
+autorizado. Las palabras de activación siguen aplicándose antes
 de entregar la orden a Codexon.
 
 Para pedir un presupuesto LLM antes de ejecutar, añade `$` inmediatamente a
@@ -292,3 +292,7 @@ modelo. El presupuesto queda persistido por chat. Responde `vamos`, `más
 barato` o `cancelar`; no hace falta repetir la palabra de activación. El modo
 económico reduce el contexto recuperado y usa Gemini Flash-Lite. Al terminar se
 muestra el coste real frente al estimado.
+
+## Instalación con solo electricidad
+
+Usa [el perfil eléctrico de ejemplo](codexon/site.electricity.example.yaml) y adapta los sensores al nuevo HA. [Supervisión del hogar](codexon/docs/home-supervision.md) explica unidades, histórico y módulos opcionales. No se necesitan cámaras, sensores de agua ni AppDaemon para las tareas y el aprendizaje eléctrico.

@@ -90,6 +90,12 @@ def finding_result(
         setting_key = f"agents.last_finding.{finding.agent}"
         previous = memory.get_setting(setting_key, "") if hasattr(memory, "get_setting") else ""
         data["deduplicated"] = previous == signature
+        # Preserve transitions in history, but refresh the current evidence and expiry on every pass.
+        if hasattr(memory, "set_setting"):
+            memory.set_setting(
+                f"agents.current_finding.{finding.agent}",
+                json.dumps({**data, "observed_at": context.now.isoformat()}, ensure_ascii=False, default=str),
+            )
         if previous != signature:
             memory.add_observation(
                 source=finding.agent,

@@ -1,0 +1,17 @@
+CameraSecurity:
+  module: CameraSecurity
+  class: CameraSecurity
+  arm_switch: input_boolean.vigilancia_general
+  night_arm_switch: input_boolean.vigilancia_noche
+  notify: notify/mobile_app_your_phone
+  simulacro_button: input_button.simulacro
+  frigate_event_sensor: sensor.frigate_event
+  motion_alerts_enabled: false
+  person_cooldown: 120
+  visual_filter_enabled: false
+  night_sensors: [binary_sensor.entrance_person]
+  cameras:
+    - name: entrance
+      camera_entity: camera.entrance
+      person_sensors: [binary_sensor.entrance_person]
+      frigate_names: [entrance]

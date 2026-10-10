@@ -1,6 +1,7 @@
 from __future__ import annotations
+import json
 
-from agents._specialist_support import entity_id, is_on, matches_any, resolve_ha_client, state_evidence
+from agents._specialist_support import active_site_states, entity_id, is_on, matches_any, resolve_ha_client, state_evidence
 from agents.base import Agent, AgentContext, AgentFinding, AgentMetadata, AgentRunResult, expires_in, finding_result
 
 
@@ -25,20 +26,39 @@ class EspecialistaAguaRiegoAgent(Agent):
             finding = AgentFinding(self.name, "water_irrigation", "No puedo leer el sistema de agua y riego.", 0.0, (f"HA: {exc.__class__.__name__}",), urgency="warning", expires_at=expires_in(context.now, 90))
             return finding_result(context, finding, ok=False)
 
-        relevant = [row for row in states if entity_id(row).split(".", 1)[0] in {"sensor", "binary_sensor", "switch"} and matches_any(row, WATER_TERMS)]
+        states = active_site_states(context, states)
+        profile = context.services.get("site_profile") or getattr(context.services.get("codexon"), "site_profile", None)
+        configured_alarms = set(profile.entities("irrigation.alarms")) if profile else set()
+        relevant = [row for row in states if entity_id(row).split(".", 1)[0] in {"sensor", "binary_sensor", "switch"} and (matches_any(row, WATER_TERMS) or entity_id(row) in configured_alarms)]
         valves = [row for row in relevant if entity_id(row).startswith("switch.") and "rele" in entity_id(row) and not matches_any(row, ("alarma", "habilitada", "luz"))]
         active = [row for row in valves if is_on(row)]
-        alarms = [row for row in relevant if entity_id(row).startswith("binary_sensor.") and matches_any(row, ("alarma", "sin agua", "conflicto", "fuga")) and is_on(row)]
+        alarm_sensors = [row for row in relevant if entity_id(row).startswith("binary_sensor.") and (entity_id(row) in configured_alarms if configured_alarms else matches_any(row, ("sin agua", "sin_agua", "conflicto caudal", "conflicto_caudal", "fuga", "moisture")))]
+        alarms = [row for row in alarm_sensors if is_on(row)]
+        unavailable = [row for row in [*valves, *alarm_sensors] if str(row.get("state", "")).lower() in {"unknown", "unavailable"}]
         volumes = [row for row in relevant if matches_any(row, ("ultimo riego", "último riego", "litro")) and str(row.get("state", "")).lower() not in {"unknown", "unavailable", "sin datos"}]
-        if alarms:
+        if not valves and not alarm_sensors:
+            summary = "Agua y riego: sin cobertura de válvulas o alarmas; no puedo confirmar seguridad."
+            urgency, action, confidence = "warning", "Configurar y verificar las entidades de agua.", 0.0
+        elif alarms:
             summary = f"Agua y riego: {len(alarms)} alarmas activas y {len(active)} válvulas abiertas."
             urgency, action, confidence = "critical", "Revisar la evidencia y pedir confirmación antes de cerrar válvulas o bombas.", 0.95
+        elif unavailable:
+            summary = f"Agua y riego: {len(unavailable)} entidades sin datos; vigilancia incompleta."
+            urgency, action, confidence = "warning", "Restablecer los sensores antes de dar el sistema por seguro.", 0.2
         elif active:
             summary = f"Agua y riego: {len(active)} válvulas activas; no hay alarmas de agua activas."
             urgency, action, confidence = "info", "Cruzar duración y contador de caudal para atribuir litros a cada zona.", 0.88
         else:
             summary = f"Agua y riego: {len(valves)} válvulas vigiladas, todas cerradas y sin alarmas activas."
             urgency, action, confidence = "info", None, 0.9
-        evidence_rows = [*alarms[:6], *active[:8], *volumes[:8]]
+        memory=context.services.get("memory")
+        measured=json.loads(memory.get_setting("home_monitor.snapshot","{}")) if memory else {}
+        from services.security_visual import timestamp
+        water=measured.get("water") or {}
+        if context.now.timestamp()-(timestamp(measured.get("updated_at")) or 0)<180 and water.get("alerts"):
+            summary += " " + " · ".join(a["message"] for a in water["alerts"])
+            urgency = "critical" if any(a["severity"]=="critical" for a in water["alerts"]) else "warning"
+            action="Revisar el contador real y las válvulas en Agua y electricidad."
+        evidence_rows = [*alarms[:6], *active[:8], *unavailable[:6], *volumes[:8]]
         finding = AgentFinding(self.name, "water_irrigation", summary, confidence, tuple(state_evidence(row) for row in evidence_rows), tuple(entity_id(row) for row in relevant), recommended_action=action, urgency=urgency, expires_at=expires_in(context.now, self.frequency_seconds * 2))
         return finding_result(context, finding, extra={"entities_checked": len(relevant), "valves": len(valves), "active_valves": len(active), "active_alarms": len(alarms), "recent_volume_sensors": len(volumes)})

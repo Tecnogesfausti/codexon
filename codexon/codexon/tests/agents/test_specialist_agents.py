@@ -15,6 +15,7 @@ from agents.especialista_estado_tecnico import EspecialistaEstadoTecnicoAgent
 from agents.especialista_presencia_seguridad import EspecialistaPresenciaSeguridadAgent
 from agents.especialista_verificador_acciones import EspecialistaVerificadorAccionesAgent
 from codexon import CodexonAgent
+from site_profile import SiteProfile
 
 
 NOW = dt.datetime(2026, 8, 2, 15, 0, tzinfo=dt.UTC)
@@ -57,6 +58,35 @@ def context(states: list[dict], memory=None) -> AgentContext:
 
 
 class SpecialistAgentsTest(unittest.TestCase):
+    def test_retired_presence_is_not_water_or_security_evidence(self) -> None:
+        ctx = context([state("binary_sensor.riego1_alarma", "on", name="Presencia IR almacén")])
+        ctx.services["site_profile"] = SiteProfile(path=None, roles={}, retired_entities=("binary_sensor.riego1_alarma",))
+        water = asyncio.run(EspecialistaAguaRiegoAgent().run(ctx))
+        presence = asyncio.run(EspecialistaPresenciaSeguridadAgent().run(ctx))
+        self.assertEqual(water.data["entities_checked"], 0)
+        self.assertEqual(water.data["active_alarms"], 0)
+        self.assertEqual(presence.data["signals_checked"], 0)
+
+    def test_water_without_coverage_or_unavailable_is_not_safe(self) -> None:
+        for rows in [[], [state("switch.riego_rele1", "unavailable")]]:
+            result = asyncio.run(EspecialistaAguaRiegoAgent().run(context(rows)))
+            self.assertEqual(result.data["finding"]["urgency"], "warning")
+            self.assertLess(result.data["finding"]["confidence"], 0.3)
+
+    def test_current_evidence_refreshes_without_duplicating_history(self) -> None:
+        memory = FakeMemory()
+        agent = EspecialistaAguaRiegoAgent()
+        first = context([state("switch.riego_rele1", "off"), state("sensor.litros", "1", unit="L")], memory)
+        asyncio.run(agent.run(first))
+        later = context([state("switch.riego_rele1", "off"), state("sensor.litros", "200", unit="L")], memory)
+        later.now = NOW + dt.timedelta(minutes=10)
+        result = asyncio.run(agent.run(later))
+        current = json.loads(memory.settings["agents.current_finding.especialista_agua_riego"])
+        self.assertTrue(result.data["deduplicated"])
+        self.assertEqual(len(memory.observations), 1)
+        self.assertIn("sensor.litros=200 L", current["finding"]["evidence"])
+        self.assertGreater(dt.datetime.fromisoformat(current["finding"]["expires_at"]), later.now)
+
     def test_presence_fuses_multiple_modalities_into_common_contract(self) -> None:
         memory = FakeMemory()
         agent_context = context([

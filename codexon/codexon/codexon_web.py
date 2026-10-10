@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 
 from agents.manager import AgentManager
 from event_engine.storage import (
@@ -28,6 +28,10 @@ from event_engine.storage import (
 from scheduler.metrics import scheduler_monitor
 from services.live_context.manager import LiveContextManager
 from services.image_analysis import analyze_image
+from services.security_visual import camera_configs, ensure_security_schema, recent_cases, set_case_label, enqueue_check, visual_metrics
+from services.security_image_storage import retention_days, validated_days, image_storage, cleanup_images, date_range, put_setting, get_setting as storage_get_setting, archive_options, RETENTION_KEY, RETENTION_ENTITY, FROM_ENTITY, TO_ENTITY, SHOW_ENTITY
+from services.home_monitor import ensure_monitor_schema
+from site_profile import SiteProfile
 from tools.registry import builtin_tool_names
 from codexon import DEFAULT_MODEL_ROUTES, ModelRouter, fetch_openrouter_model_catalog
 from workspace_api import router as workspace_router
@@ -69,7 +73,7 @@ BACKUP_KEY = os.getenv("CODEXON_BACKUP_KEY", "")
 MODEL_PAGE_SIZE = 50
 MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
-app = FastAPI(title="Codexon", version="0.3.14")
+app = FastAPI(title="Codexon", version="0.3.17")
 app.include_router(workspace_router)
 
 
@@ -255,6 +259,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         if str(row["recovery_policy"] or "") != policy:
             conn.execute("UPDATE tasks SET recovery_policy = ? WHERE id = ?", (policy, int(row["id"])))
     ensure_event_schema(conn)
+    ensure_security_schema(conn)
+    ensure_monitor_schema(conn)
     conn.commit()
 
 
@@ -494,6 +500,7 @@ def build_agent_manager() -> AgentManager:
         context_services={
             "memory": WebMemory(),
             "live_context": LiveContextManager(),
+            "site_profile": SiteProfile.load(SITE_PROFILE_PATH),
             "codexon": WebCodexonContext(
                 ha_base_url=web_ha_base_url(),
                 ha_token=os.getenv("HOME_ASSISTANT_TOKEN") or os.getenv("HA_TOKEN") or os.getenv("HA_LONG_LIVED_TOKEN"),
@@ -506,6 +513,11 @@ def build_agent_manager() -> AgentManager:
 
 
 AGENT_PRESENTATION = {
+    "especialista_consumo_electrico": {
+        "purpose": "Aprender patrones de consumo por circuito, hora y día.",
+        "inputs": "Potencia, energía y estadísticas de Recorder de los circuitos configurados",
+        "output": "Desviaciones medidas y escenarios de ahorro cuantificados",
+    },
     "especialista_presencia_seguridad": {
         "purpose": "Fusionar señales de presencia y seguridad antes de elevar una alerta.",
         "inputs": "Radares, infrarrojos y detección de personas de HA",
@@ -592,6 +604,13 @@ def agent_rows(manager: AgentManager | None = None) -> list[dict[str, Any]]:
         )
         row["observation_count"] = int(count_rows[0]["count"] or 0) if count_rows else 0
         row["last_observation"] = observations[0] if observations else None
+        try:
+            current = json.loads(get_setting(f"agents.current_finding.{row['name']}") or "null")
+        except ValueError:
+            current = None
+        row["current_finding"] = current
+        if isinstance(current, dict) and isinstance(current.get("finding"), dict):
+            row["last_observation"] = {"created_at": current.get("observed_at"), "summary": current["finding"].get("finding")}
         row["execution_mode"] = "scheduled" if row["enabled"] else "paused"
         row["uses_llm"] = False
         row["finding_contract"] = "codexon.agent_finding.v1" if row["name"].startswith("especialista_") else None
@@ -1346,6 +1365,140 @@ def api_delete_task(task_id: int) -> dict[str, Any]:
     return {"ok": True, "id": task_id}
 
 
+@app.get("/api/security-visual")
+def api_security_visual(hide_inconclusive: bool = False, from_date: str | None = None, to_date: str | None = None, limit: int = 50) -> dict[str, Any]:
+    try:
+        profile=SiteProfile.load(SITE_PROFILE_PATH)
+        configs = camera_configs(profile)
+        config_error = None
+    except (ValueError, OSError):
+        configs = ()
+        profile=SiteProfile.empty()
+        config_error = "La configuración visual necesita revisión."
+    conn = connect_db()
+    try:
+        if not 1<=limit<=2000:raise HTTPException(status_code=400,detail='El límite debe estar entre 1 y 2000 episodios.')
+        timezone=(profile.binding('water.monitor') or {}).get('timezone',profile.timezone)
+        try:selected=date_range(from_date,to_date,timezone)
+        except (ValueError,OverflowError):raise HTTPException(status_code=400,detail='Intervalo de fechas no válido: selecciona Desde y Hasta en orden.')
+        rows = recent_cases(conn,limit,exclude_inconclusive=hide_inconclusive,start_timestamp=selected['start_timestamp'],end_timestamp=selected['end_timestamp'])
+        totals = dict(conn.execute("SELECT status,count(*) FROM security_visual_cases GROUP BY status").fetchall())
+        labels = dict(conn.execute("SELECT label,count(*) FROM security_visual_cases WHERE label IS NOT NULL GROUP BY label").fetchall())
+        risky = conn.execute("SELECT count(*) FROM security_visual_cases WHERE label IN ('person','legitimate') AND json_extract(result_json,'$.visual_verdict')='supported_false_positive'").fetchone()[0]
+        usage = conn.execute("SELECT count(*),coalesce(sum(estimated_cost_usd),0),coalesce(sum(total_tokens),0) FROM usage_events WHERE context='security_visual'").fetchone()
+        attempts = conn.execute("SELECT count(*) FROM security_visual_reviews WHERE llm_called=1").fetchone()[0]
+        comparison = [dict(row) for row in conn.execute("SELECT label,json_extract(result_json,'$.visual_verdict') AS verdict,count(*) AS count FROM security_visual_cases WHERE label IS NOT NULL AND result_json IS NOT NULL GROUP BY label,verdict")]
+        settings = {row["key"]: row["value"] for row in conn.execute("SELECT key,value FROM settings WHERE key LIKE 'security_visual.%'")}
+        days=retention_days(conn)
+        return {"mode": "conservative_filter" if (profile.binding("security.visual_filter") or {}).get("enabled") is True else "shadow", "filter_outcomes": dict(conn.execute("SELECT outcome,count(*) FROM security_visual_filter_requests WHERE outcome IS NOT NULL GROUP BY outcome").fetchall()), "cameras": [dataclasses.asdict(c) for c in configs], "config_error": config_error, "cases": rows, "totals": totals, "labels": labels, "comparison": comparison, "would_filter_real_person": risky, "usage": {"calls": usage[0], "attempts": attempts, "estimated_cost_usd": usage[1], "tokens": usage[2]}, "health": settings, "image_retention_days": days, "storage":image_storage(DB_PATH.parent/'security_visual_images',days,**archive_options(conn)),"date_range":selected,"browse_selection":json.loads(storage_get_setting(conn,'security_visual.browse_selection','null')),"metrics": visual_metrics(conn), "diagnostics": json.loads(settings.get("security_visual.diagnostics", "[]"))}
+    finally:
+        conn.close()
+
+
+async def visual_helper_service(domain,service,payload):
+    base=web_ha_base_url();token=os.getenv('HOME_ASSISTANT_TOKEN') or os.getenv('HA_TOKEN') or os.getenv('HA_LONG_LIVED_TOKEN')
+    if not base or not token or httpx is None:raise HTTPException(status_code=503,detail='Sin conexión con los ayudantes de Home Assistant.')
+    try:
+        async with httpx.AsyncClient(timeout=15,headers={'Authorization':'Bearer '+token}) as client:
+            response=await client.post(base+'/api/services/'+domain+'/'+service,json=payload);response.raise_for_status()
+    except httpx.HTTPError:raise HTTPException(status_code=503,detail='No se pudo actualizar el ayudante de Home Assistant.')
+
+
+@app.post('/api/security-visual/simulacro')
+async def api_visual_simulacro() -> dict[str, Any]:
+    await visual_helper_service('input_button', 'press', {'entity_id': 'input_button.simulacro'})
+    return {'ok': True, 'message': 'Simulacro de 2 minutos iniciado: avisos hablados y comprobación de imágenes con IA, sin acciones físicas.'}
+
+
+@app.post('/api/security-visual/storage')
+async def api_visual_storage(payload:dict[str,Any])->dict[str,Any]:
+    try:days=validated_days(payload.get('retention_days'))
+    except ValueError as exc:raise HTTPException(status_code=400,detail=str(exc))
+    await visual_helper_service('input_number','set_value',{'entity_id':RETENTION_ENTITY,'value':days})
+    conn=connect_db()
+    try:
+        put_setting(conn,RETENTION_KEY,str(days))
+        report=cleanup_images(DB_PATH.parent/'security_visual_images',days,**archive_options(conn))
+        put_setting(conn,'security_visual.storage_last_cleanup',{**report,'at':utc_now()})
+        return {'ok':True,**report}
+    finally:conn.close()
+
+
+@app.post('/api/security-visual/browse')
+async def api_visual_browse(payload:dict[str,Any])->dict[str,Any]:
+    if not payload.get('from_date') or not payload.get('to_date'):raise HTTPException(status_code=400,detail='Selecciona las dos fechas.')
+    try:selected=date_range(payload['from_date'],payload['to_date'])
+    except (ValueError,OverflowError) as exc:raise HTTPException(status_code=400,detail=str(exc))
+    await visual_helper_service('input_datetime','set_datetime',{'entity_id':FROM_ENTITY,'date':selected['from_date']})
+    await visual_helper_service('input_datetime','set_datetime',{'entity_id':TO_ENTITY,'date':selected['to_date']})
+    await visual_helper_service('input_button','press',{'entity_id':SHOW_ENTITY})
+    conn=connect_db()
+    try:
+        selection={'from_date':selected['from_date'],'to_date':selected['to_date'],'requested_at':utc_now()}
+        put_setting(conn,'security_visual.browse_selection',selection)
+        return {'ok':True,'selection':selection}
+    finally:conn.close()
+
+
+@app.get("/api/home-monitor")
+def api_home_monitor() -> dict[str, Any]:
+    conn=connect_db()
+    try:
+        settings={r['key']:r['value'] for r in conn.execute("SELECT key,value FROM settings WHERE key LIKE 'home_monitor.%' OR key LIKE 'sensor_observer.%'")}
+        value=json.loads(settings.get('home_monitor.snapshot','{}'))
+        value['efficiency']=json.loads(settings.get('sensor_observer.efficiency','{}'))
+        value['history']=json.loads(settings.get('home_monitor.history','{}'))
+        value['error']=json.loads(settings.get('home_monitor.error','null'))
+        value['history_error']=json.loads(settings.get('home_monitor.history_error','null'))
+        return value
+    finally:conn.close()
+
+
+@app.post("/api/security-visual/check")
+def api_visual_check(payload: dict[str, Any]) -> dict[str, Any]:
+    configs=camera_configs(SiteProfile.load(SITE_PROFILE_PATH))
+    config=next((c for c in configs if c.name==payload.get('camera')),None)
+    if config is None:raise HTTPException(status_code=400,detail='Cámara no configurada.')
+    conn=connect_db()
+    try:
+        try:case_id=enqueue_check(conn,config)
+        except ValueError as exc:raise HTTPException(status_code=429,detail=str(exc)) from exc
+        return {'case_id':case_id,'kind':'installation_check','message':'Comprobación de foto e IA encolada; no simula una intrusión.'}
+    finally:conn.close()
+
+
+@app.patch("/api/security-visual/{case_id}/label")
+def api_security_label(case_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    conn = connect_db()
+    try:
+        try:
+            found = set_case_label(conn, case_id, str(payload.get("label") or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not found:
+            raise HTTPException(status_code=404, detail="Episodio no encontrado")
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+@app.get("/api/security-visual/{case_id}/images/{review_id}/{index}")
+def api_security_image(case_id: int, review_id: int, index: int) -> FileResponse:
+    conn = connect_db()
+    try:
+        row = conn.execute("SELECT frames_json FROM security_visual_reviews WHERE id=? AND case_id=?", (review_id, case_id)).fetchone()
+        frames = json.loads(row["frames_json"]) if row else []
+        if not 0 <= index < len(frames):
+            raise HTTPException(status_code=404, detail="Imagen no encontrada")
+        path = Path(frames[index]["path"]).resolve()
+        root = (DB_PATH.parent / "security_visual_images").resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise HTTPException(status_code=404, detail="Imagen caducada o no disponible")
+        return FileResponse(path, media_type=frames[index]["media_type"])
+    finally:
+        conn.close()
+
+
 @app.get("/api/agents")
 def api_agents() -> dict[str, Any]:
     manager = build_agent_manager()
@@ -1624,7 +1777,7 @@ def index() -> str:
     button.warning { background: var(--warn); }
     button.danger { background: var(--danger); }
     button.ghost { color: var(--ink); background: white; border: 1px solid var(--line); }
-    .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 14px; margin-bottom: 4px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; overflow-x: auto; padding: 4px 0 14px; margin-bottom: 4px; }
     .tab { flex: 0 0 auto; color: var(--ink); background: rgba(255,255,255,.78); border: 1px solid var(--line); }
     .tab.active { color: white; background: var(--brand); border-color: var(--brand); }
     [data-page]:not(.active) { display: none !important; }
@@ -1689,11 +1842,13 @@ def index() -> str:
     </header>
     <nav class="tabs" aria-label="Zonas">
       <button class="tab active" data-tab="resumen" onclick="setPage('resumen')">Resumen</button>
+      <button class="tab" data-tab="consumos" onclick="setPage('consumos')">Agua y electricidad</button>
       <button class="tab" data-tab="modelos" onclick="setPage('modelos')">Modelos</button>
       <button class="tab" data-tab="tareas" onclick="setPage('tareas')">Tareas</button>
       <button class="tab" data-tab="escuchas" onclick="setPage('escuchas')">Escuchas</button>
       <button class="tab" data-tab="monitor" onclick="setPage('monitor')">Monitor</button>
       <button class="tab" data-tab="agentes" onclick="setPage('agentes')">Agentes</button>
+      <button class="tab" data-tab="seguridad" onclick="setPage('seguridad')">Seguridad visual</button>
       <button class="tab" data-tab="imagenes" onclick="setPage('imagenes')">Análisis de imágenes</button>
       <button class="tab" data-tab="whatsapp" onclick="setPage('whatsapp')">Conexión WhatsApp</button>
       <button class="tab" data-tab="sistema" onclick="setPage('sistema')">Sistema</button>
@@ -1705,6 +1860,15 @@ def index() -> str:
       <div class="stat active" data-page="resumen"><p>Llamadas LLM</p><strong id="calls">-</strong></div>
       <div class="stat active" data-page="resumen"><p>Coste estimado</p><strong id="cost">-</strong></div>
 
+      <section class="full active" data-page="resumen">
+        <h2>Vigilancia de la casa</h2><p id="homeSummary">Cargando estado de seguridad y consumos…</p>
+        <div id="homeAlerts"></div><div id="homeSecurity"></div>
+        <div class="toolbar" style="margin-top:12px"><button onclick="setPage('seguridad')">Ver seguridad visual</button><button class="secondary" onclick="setPage('consumos')">Ver agua y electricidad</button></div>
+      </section>
+      <section class="full" data-page="consumos">
+        <h2>Agua y electricidad</h2><p id="consumptionSummary">Cargando consumos medidos…</p>
+        <div id="waterMonitor"></div><div id="energyMonitor"></div><p id="efficiencySummary"></p>
+      </section>
       <section class="full" data-page="modelos">
         <h2>Modelos IA</h2>
         <div class="toolbar">
@@ -1728,6 +1892,18 @@ def index() -> str:
         <h2>Agentes</h2>
         <p id="agentSummary" class="muted">Cargando agentes…</p>
         <div class="table-scroll"><table class="agent-table"><thead><tr><th class="agent-purpose">Agente y finalidad</th><th class="agent-io">Entradas y salida</th><th class="agent-status">Estado real</th><th class="agent-plan">Plan previsto</th><th class="agent-history">Historial persistente</th><th class="agent-actions"></th></tr></thead><tbody id="agents"></tbody></table></div>
+      </section>
+
+      <section class="full" data-page="seguridad">
+        <h2>Supervisión visual</h2>
+        <div class="toolbar"><button id="visualSimulacroButton" onclick="startVisualSimulacro()">Simulacro</button><span id="visualSimulacroStatus" class="muted">Prueba de 2 minutos de detectores e IA para ambas alarmas.</span></div>
+        <div class="toolbar"><label>Desde<input id="visualFromDate" type="date"></label><label>Hasta<input id="visualToDate" type="date"></label><button onclick="showVisualDates()">Mostrar imágenes</button><button class="ghost" onclick="resetVisualDates()">Últimos 2 días</button></div>
+        <p id="visualDateStatus" class="muted"></p>
+        <details style="margin-top:12px"><summary>Almacenamiento de imágenes</summary><div class="toolbar"><label>Conservar imágenes (días)<input id="visualRetentionDays" type="number" min="1" max="90" step="1" value="15"></label><button class="secondary" onclick="saveVisualRetention()">Guardar y borrar antiguas</button></div><p id="visualStorage" class="muted"></p><p>El borrado automático se ejecuta cada hora y elimina las fotos de Codexon y de avisos de AppDaemon que superan el plazo elegido. Los registros del análisis se conservan. Frigate mantiene su conservación independiente.</p></details>
+        <details style="margin-top:12px"><summary>Detalles de supervisión</summary>
+        <p id="visualModeDescription">Cargando política de avisos.</p>
+        <p id="visualSummary" class="muted">Cargando supervisión…</p>
+        <p>Las fechas de evento están en UTC; el reloj de la cámara puede mostrar hora local. Esa diferencia no demuestra retraso.</p><div id="visualMetrics"></div><div id="visualChecks" class="toolbar"></div></details><div id="visualCases"></div>
       </section>
 
       <section class="full" data-page="tareas">
@@ -1914,6 +2090,8 @@ function setPage(name) {
   if (name === 'modelos') loadModels();
   if (name === 'tareas') loadTasks();
   if (name === 'agentes') loadAgents();
+  if (name === 'seguridad') { loadSecurityVisual(); loadHomeMonitor(); }
+  if (name === 'consumos' || name === 'resumen') loadHomeMonitor();
   if (name === 'whatsapp') loadWhatsApp();
 }
 function showNotice(message, kind = 'ok') {
@@ -1925,8 +2103,10 @@ function showNotice(message, kind = 'ok') {
 }
 function isoFromLocal(value) { return value ? new Date(value).toISOString() : null; }
 async function loadAll() {
+  loadHomeMonitor();
   loadTasks();
   loadAgents();
+  if (document.querySelector('[data-tab="seguridad"].active')) loadSecurityVisual();
   const [status, whatsapp, observations, listeners, monitor, logs, tools, codex, notes, backups] = await Promise.all([
     requestJSON('/api/status'), requestJSON('/api/whatsapp'), requestJSON('/api/observations'), requestJSON('/api/event-listeners'), requestJSON('/api/task-monitor'), requestJSON('/api/logs'), requestJSON('/api/tools'), requestJSON('/api/codex/context'), requestJSON('/api/codex/notes'), requestJSON('/api/backups')
   ]);
@@ -2124,6 +2304,132 @@ async function loadAgents() {
     summary.textContent = 'No se pudo cargar el inventario de agentes.';
     showNotice(err.message, 'error');
   }
+}
+let visualDateRange = null;
+let visualSelectionSeen = null;
+let visualControlsInitialized = false;
+async function showVisualDates() {
+  const from = document.getElementById('visualFromDate').value, to = document.getElementById('visualToDate').value;
+  if (!from || !to || from > to) { showNotice('Selecciona Desde y Hasta en orden.', 'error'); return; }
+  try {
+    const result = await requestJSON('/api/security-visual/browse', {method:'POST',body:JSON.stringify({from_date:from,to_date:to})});
+    visualDateRange={from_date:from,to_date:to};visualSelectionSeen=result.selection.requested_at;
+    await loadSecurityVisual();
+  } catch (err) { showNotice(err.message,'error'); }
+}
+async function resetVisualDates() { visualDateRange=null;visualControlsInitialized=false;await loadSecurityVisual(); }
+async function saveVisualRetention() {
+  const days=Number(document.getElementById('visualRetentionDays').value);
+  if (!Number.isInteger(days) || days<1 || days>90) { showNotice('Elige entre 1 y 90 días.','error'); return; }
+  try {
+    const r=await requestJSON('/api/security-visual/storage',{method:'POST',body:JSON.stringify({retention_days:days})});
+    showNotice(`Conservación: ${days} días. Borradas ${r.deleted_files} imágenes; ${(r.freed_bytes/1048576).toFixed(2)} MiB liberados.`);
+    await loadSecurityVisual();
+  } catch (err) { showNotice(err.message,'error'); }
+}
+let visualSimulacroTimer=null, visualSimulacroPollingUntil=0, visualSimulacroAwaitingStartUntil=0;
+function scheduleVisualSimulacroRefresh() {
+  if (visualSimulacroTimer !== null || Date.now() >= visualSimulacroPollingUntil) return;
+  visualSimulacroTimer=setTimeout(async()=>{visualSimulacroTimer=null;await loadSecurityVisual();scheduleVisualSimulacroRefresh();},5000);
+}
+async function startVisualSimulacro() {
+  const button=document.getElementById('visualSimulacroButton');button.disabled=true;
+  try { const r=await requestJSON('/api/security-visual/simulacro',{method:'POST',body:JSON.stringify({})});showNotice(r.message);document.getElementById('visualSimulacroStatus').textContent='Simulacro de 2 minutos: detectores e IA en prueba…';visualSimulacroPollingUntil=Date.now()+195000;visualSimulacroAwaitingStartUntil=Date.now()+8000;scheduleVisualSimulacroRefresh(); }
+  catch(err) { showNotice(err.message);button.disabled=false; }
+}
+async function loadSecurityVisual() {
+  try {
+    const params=new URLSearchParams({hide_inconclusive:'true',limit:'2000',...(visualDateRange || {})});
+    const data = await requestJSON('/api/security-visual?'+params);
+    const selection=data.browse_selection;
+    if (visualSelectionSeen === null) visualSelectionSeen=selection?.requested_at || '';
+    else if (selection && selection.requested_at !== visualSelectionSeen) {
+      visualSelectionSeen=selection.requested_at;visualDateRange={from_date:selection.from_date,to_date:selection.to_date};
+      document.getElementById('visualFromDate').value=selection.from_date;document.getElementById('visualToDate').value=selection.to_date;
+      await loadSecurityVisual();return;
+    }
+    if (!visualControlsInitialized) {
+      document.getElementById('visualFromDate').value=data.date_range.from_date;document.getElementById('visualToDate').value=data.date_range.to_date;
+      document.getElementById('visualRetentionDays').value=data.image_retention_days;visualControlsInitialized=true;
+    }
+    document.getElementById('visualDateStatus').textContent=`Del ${data.date_range.from_date} al ${data.date_range.to_date}, ambos incluidos · ${data.cases.length} episodios · ${data.date_range.timezone}`;
+    document.getElementById('visualStorage').textContent=`${data.storage.files} imágenes · ${(data.storage.bytes/1048576).toFixed(2)} MiB · conservación ${data.image_retention_days} días${data.storage.appdaemon_files !== undefined ? ' · '+data.storage.codexon_files+' de Codexon + '+data.storage.appdaemon_files+' de avisos' : ''}`;
+    document.getElementById('visualModeDescription').textContent = data.mode === 'conservative_filter' ? 'Filtro activo: solo descarta avisos Frigate con dos modelos y una foto verificada del evento. Espera máxima 15 s. Tapo y sensores físicos conservan avisos inmediatos.' : 'Modo observación: los resultados no descartan avisos.';
+    const drill=JSON.parse(data.health['security_visual.simulacro'] || '{}');
+    const drillActive=drill.state === 'en_curso' && Number(drill.ends_at)*1000 > Date.now();
+    if(drillActive){visualSimulacroAwaitingStartUntil=0;visualSimulacroPollingUntil=Math.max(visualSimulacroPollingUntil,Number(drill.ends_at)*1000+15000);scheduleVisualSimulacroRefresh();}
+    const drillStarting=Date.now()<visualSimulacroAwaitingStartUntil;
+    document.getElementById('visualSimulacroButton').disabled=drillActive || drillStarting;
+    document.getElementById('visualSimulacroStatus').textContent=drillActive ? 'Simulacro en curso: '+Math.ceil((Number(drill.ends_at)*1000-Date.now())/1000)+' s restantes · '+(drill.general || []).length+' presencias en General · '+(drill.nocturna || []).length+' en Nocturna · '+(drill.visual_results || []).filter(r=>r.verdict === 'person_visible').length+' personas verificadas · '+(drill.visual_results || []).filter(r=>r.verdict === 'inconclusive').length+' sin verificar' : drillStarting ? 'Iniciando simulacro…' : drill.state === 'error_envio' ? 'No se pudo enviar alguno de los avisos de voz.' : drill.last_message || 'Prueba de 2 minutos de detectores e IA para ambas alarmas.';
+    const heartbeat = data.health['security_visual.heartbeat'];
+    const fresh = heartbeat && Date.now() - Date.parse(heartbeat) < 90000;
+    const connection = JSON.parse(data.health['security_visual.connection'] || '{}');
+    const personIcon = '<svg role="img" aria-label="Persona detectada" viewBox="0 0 24 24" width="22" height="22" style="color:#dc2626;vertical-align:middle;margin-left:6px" fill="currentColor"><title>Persona detectada</title><circle cx="12" cy="4" r="3"/><path d="M8 8h8l3 7-2 1-2-4v10h-2v-6h-2v6H9V12l-2 4-2-1z"/></svg>';
+    const verdicts = {supported_false_positive: 'Falsa detección sustentada'};
+    document.getElementById('visualSummary').textContent = `${data.cameras.map(c => c.name).join(', ') || 'Sin cámaras activas'} · ${fresh ? 'Supervisor activo' : 'Sin señal reciente del supervisor'} · ${connection.connected ? 'Eventos conectados' : 'Sin conexión de eventos confirmada'} · ${data.usage.calls} análisis · coste estimado $${Number(data.usage.estimated_cost_usd).toFixed(5)} · ${data.would_filter_real_person} personas etiquetadas que se habrían filtrado${data.config_error ? ' · ' + data.config_error : ''}`;
+    document.getElementById('visualSummary').textContent += ` · ${data.metrics.labeled_cases} episodios etiquetados · evaluación ${data.metrics.calibration_ready ? 'con muestras suficientes' : 'en aprendizaje'}`;
+    const modelSelection=JSON.parse(data.health['security_visual.model_selection'] || '{}');
+    if (modelSelection.effective_model) document.getElementById('visualSummary').textContent += ` · IA de seguridad: ${modelSelection.effective_model}${modelSelection.fallback_reason ? ' (respaldo compatible)' : ''}`;
+    const aiStatus=JSON.parse(data.health['security_visual.ai_status'] || '{}');
+    if (aiStatus.state === 'error') document.getElementById('visualSummary').textContent += ' · Falló la última revisión de IA; avisos de sensores conservados';
+    const modelNotice=JSON.parse(data.health['security_visual.model_removal_notice'] || '{}');
+    if (modelNotice.model && !modelNotice.resolved) document.getElementById('visualSummary').textContent += ` · Modelo retirado del catálogo: ${modelNotice.model}${modelNotice.sent ? ' · aviso enviado a HA' : ' · aviso a HA pendiente'}`;
+    const arming = JSON.parse(data.health['security_visual.arming'] || '{}');
+    if (drillActive) { document.getElementById('visualSummary').textContent += ' · Simulacro: revisión IA de todas las cámaras, sin acciones físicas'; } else if (arming.enabled) {
+      const active = Object.entries(arming.cameras || {}).filter(([camera, mode]) => mode === 'total' || mode === 'night');
+      document.getElementById('visualSummary').textContent += arming.unknown ? ' · Armado sin confirmar: revisión conservada ante detecciones' : active.length ? ' · Revisión IA activa: ' + active.map(([camera, mode]) => camera + ' (' + (mode === 'total' ? 'total' : 'nocturna') + ')').join(', ') : ' · Desarmado: IA automática en pausa; detección local activa';
+    }
+    if (data.mode === 'conservative_filter') document.getElementById('visualSummary').textContent += ' · Filtro activo de Frigate: espera máxima 15 s · ' + Number(data.filter_outcomes?.suppressed || 0) + ' avisos descartados';
+    const groups = data.metrics.groups.filter(g => g.verdict !== 'inconclusive');
+    document.getElementById('visualMetrics').innerHTML = groups.length ? `<div class="table-scroll"><table><thead><tr><th>Cámara</th><th>Luz</th><th>Etiqueta humana</th><th>Resultado visual</th><th>Episodios</th></tr></thead><tbody>${groups.map(g=>`<tr><td>${html(g.camera)}</td><td>${html({day:'Día',night:'Noche',unknown:'Sin dato'}[g.light_context] || g.light_context)}</td><td>${html(g.label)}</td><td>${g.verdict === 'person_visible' ? personIcon : html(verdicts[g.verdict] || 'Pendiente')}</td><td>${g.count}</td></tr>`).join('')}</tbody></table></div><p>Causas propuestas por el modelo en falsas detecciones etiquetadas: ${html(JSON.stringify(data.metrics.model_described_causes))}</p>` : '<p>Etiqueta episodios reales para medir los falsos positivos por cámara y día/noche. Las comprobaciones de instalación no cuentan.</p>';
+    const weatherGroups = (data.metrics.weather_groups || []).filter(g => g.weather_context !== 'unknown' && g.verdict !== 'inconclusive');
+    const weatherNames = {rainy:'Lluvia',pouring:'Lluvia intensa',sunny:'Soleado','clear-night':'Despejado de noche',cloudy:'Nublado',partlycloudy:'Parcialmente nublado',fog:'Niebla',lightning:'Tormenta','lightning-rainy':'Tormenta con lluvia',windy:'Viento'};
+    if (weatherGroups.length) document.getElementById('visualMetrics').innerHTML += `<details><summary>Comparar por tiempo informado por HA</summary><div class="table-scroll"><table><thead><tr><th>Cámara</th><th>Tiempo</th><th>Etiqueta humana</th><th>Resultado</th><th>Episodios</th></tr></thead><tbody>${weatherGroups.map(g=>`<tr><td>${html(g.camera)}</td><td>${html(weatherNames[g.weather_context] || g.weather_context)}</td><td>${html(g.label)}</td><td>${g.verdict === 'person_visible' ? personIcon : html(verdicts[g.verdict] || 'Pendiente')}</td><td>${g.count}</td></tr>`).join('')}</tbody></table></div></details>`;
+
+    document.getElementById('visualChecks').innerHTML = data.cameras.map(c => `<button class="ghost" onclick="checkVisual('${html(c.name)}')">Comprobar foto e IA: ${html(c.name)}</button>`).join('');
+    const cases = data.cases.filter(c => c.result?.visual_verdict !== 'inconclusive');
+    document.getElementById('visualCases').innerHTML = cases.length ? cases.map(c => {
+      const v = c.result;
+      const latest = (c.reviews || [])[0];
+      const frames=(latest?.frames || []).filter(f=>f.available !== false);
+      return `<article class="stat" style="margin-top:12px"><strong style="font-size:1rem">#${c.id}${v?.visual_verdict === 'person_visible' ? personIcon : ''} · ${c.candidate.kind === 'installation_check' ? 'Comprobación de instalación · ' : c.candidate.kind === 'historical_check' ? 'Comprobación histórica real · ' : c.candidate.kind === 'simulacro' ? 'Simulacro · ' : ''}${html(c.camera)} · ${html(c.detected_at)}</strong>${v?.visual_verdict === 'person_visible' ? '' : `<p>${html(v ? verdicts[v.visual_verdict] : 'Pendiente de revisión')}</p>`}<div style="margin-top:10px">${frames.length ? frames.map(f => `<a href="${html(f.url)}" target="_blank" rel="noopener"><img src="${html(f.url)}" alt="Fotograma revisado del episodio ${c.id}" loading="lazy" style="max-width:280px;max-height:180px;margin-right:8px" /></a>`).join('') : latest?.frames.length ? '<p class="muted">Imágenes caducadas o no disponibles.</p>' : ''}</div><details style="margin-top:10px"><summary>Detalles</summary>${c.candidate.kind === 'simulacro' ? `<p>Prueba de detección · luz: ${html(c.candidate.light_context || 'sin dato')} · tiempo informado por HA: ${html(c.candidate.environment?.['weather.aemet']?.state || c.candidate.environment?.['weather.casa']?.state || 'sin dato')}</p>` : ''}${c.filter_outcomes?.length ? `<p>Aviso Frigate: ${html(c.filter_outcomes.map(o=>({suppressed:'descartado por el filtro',notified:'enviado',timeout:'enviado al agotar la espera',already_notified:'ya enviado por otro detector',disarmed:'desarmado durante la espera',invalid_result:'aviso conservado'}[o.outcome] || 'pendiente')).join(' · '))}</p>` : ''}<p>${html(v ? [...v.observations, ...v.limitations].join(' · ') : '')}</p><p class="muted">${html(c.candidate.sources.join(' + '))} · ${html(v ? 'Correspondencia temporal: ' + v.time_alignment : '')}${latest ? ' · ' + html(latest.model || '') + ' · ' + html(latest.duration_ms || 0) + ' ms' : ''}</p><label>Tu revisión<select onchange="labelSecurityCase(${c.id},this.value)"><option value="">Sin etiquetar</option>${[['person','Persona real'],['false_detection','Falsa detección'],['legitimate','Presencia legítima'],['unknown','No determinable']].map(([k,t]) => `<option value="${k}" ${c.label === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label></details></article>`;
+    }).join('') : '<p>No hay episodios concluyentes para mostrar.</p>';
+  } catch (err) { document.getElementById('visualSummary').textContent = err.message; }
+}
+async function loadHomeMonitor() {
+  try {
+    const d=await requestJSON('/api/home-monitor');
+    const fresh=d.updated_at && Date.now()-Date.parse(d.updated_at)<180000;
+    const e=d.energy || {circuits:[]}, w=d.water;
+    document.getElementById('homeSummary').textContent=d.updated_at ? `${fresh ? 'Supervisor de consumos activo' : 'Datos de supervisión atrasados'} · actualizado ${new Date(d.updated_at).toLocaleString('es-ES')} · ${e.total_power_w ?? 'sin datos'} W · ${e.today_kwh ?? 'sin datos'} kWh hoy` : 'El supervisor está iniciándose; todavía no hay medidas recientes.';
+    const alerts=d.alerts || [];
+    document.getElementById('homeAlerts').innerHTML=alerts.length ? alerts.map(a=>`<p style="padding:8px;border-left:4px solid ${a.severity==='critical'?'#b91c1c':'#b45309'}">${html(a.message)}</p>`).join('') : `<p>${fresh ? 'Sin anomalías detectadas en las medidas disponibles.' : 'Esperando medidas recientes.'}</p>`;
+    document.getElementById('homeSecurity').innerHTML=(d.security || []).map(c=>{
+      const b=c.frigate_bridge || {}, fps=b.camera_fps || {};
+      return `<p><strong>${html(c.name)}</strong> · cámara ${html(c.camera_state)} · personas Tapo ${c.native_person_available ? 'disponible' : 'NO DISPONIBLE'} · ${c.trigger_policy === 'person_only' ? 'solo detecciones de persona; movimiento ignorado' : c.motion_fallback ? 'revisión visual por movimiento activa' : 'movimiento de respaldo inactivo'} · pausa IA ${html(c.visual_cooldown_seconds)} s · límite IA ${html(c.daily_call_limit)} llamadas/día · Frigate ${b.reachable && Object.values(fps).some(v=>v>0) ? 'vídeo y API disponibles' : 'sin cobertura confirmada'} · último evento Frigate ${html(b.last_event_at || 'ninguno registrado')} · MQTT ${html(c.mqtt_state)} · última revisión ${html(c.last_review_at || 'ninguna')} · resultado ${html(c.last_verdict || 'pendiente')} · error ${html(c.last_error || 'ninguno')}</p>`;
+    }).join('');
+    document.getElementById('consumptionSummary').textContent=`${e.coverage || 'Esperando configuración'} · Histórico: ${d.history?.accepted || 0} horas válidas en la última actualización.`;
+    document.getElementById('waterMonitor').innerHTML=w ? `<h3>Agua de riego</h3><p>Cobertura ${w.coverage ? 'disponible' : 'INCOMPLETA'} · contador ${w.counter_liters ?? 'sin datos'} L · caudal medio de 5 min ${w.flow_lpm_5min ?? 'aprendiendo'} L/min · ${w.active_relays.length} relés abiertos · resolución ${w.resolution_liters ?? 'desconocida'} L/pulso</p><p>${html(w.note)}</p><p>${w.zone_baselines.length} zonas con sesiones medidas. Se necesitan 5 sesiones válidas de una zona para comparar su caudal habitual.</p>` : '<p>Agua: sin contador configurado.</p>';
+    const names=['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+    document.getElementById('energyMonitor').innerHTML=(e.circuits || []).map(c=>{
+      const max=Math.max(.001,...c.hour_profile.map(p=>p.median_kwh));
+      const bars=c.hour_profile.map(p=>`<div title="${p.hour}:00 · mediana ${p.median_kwh} kWh · ${p.samples} muestras" style="flex:1;background:#0f766e;height:${Math.max(2,p.median_kwh/max*65)}px"></div>`).join('');
+      const saving=c.saving_scenario;
+      return `<article style="margin-top:16px;padding:12px;border:1px solid #d3e1dc;border-radius:8px"><h3>${html(c.name)}</h3><p>${c.power_w ?? 'sin datos'} W · ${c.today_kwh ?? 'sin datos'} kWh hoy · ${c.hours} horas históricas · ${html({trained:'patrón aprendido',learning:'aprendiendo',unavailable:'sensor no disponible',history_stale:'histórico atrasado'}[c.status] || c.status)}</p><div aria-label="Perfil horario de consumo de 0 a 23 horas" style="display:flex;gap:3px;height:70px;align-items:end">${bars}</div><p>0 h → 23 h · mediana de consumo por hora · ${c.expected_hour_kwh !== undefined ? `última hora ${c.last_hour_kwh} kWh frente a ${c.expected_hour_kwh} habituales (${c.baseline_samples} muestras comparables)` : 'faltan muestras comparables para evaluar la última hora'}</p><p>${c.weekday_profile.map(p=>`${names[p.weekday]}: ${p.median_kwh} kWh/día (${p.samples} muestras)`).join(' · ')}</p>${saving ? `<p>Base nocturna: ${c.night_base_w} W. Escenario de reducción del 20%, 5 h/día: ${saving.kwh_30_days} kWh/mes${saving.eur_30_days_at_current_price !== null ? ` · ${saving.eur_30_days_at_current_price} €/mes al precio actual` : ''}. ${html(saving.message)}</p>` : ''}${c.anomalies.map(a=>`<p style="color:#b45309">${html(a.message)}</p>`).join('')}</article>`;
+    }).join('') || '<p>Esperando circuitos configurados.</p>';
+    const eff=d.efficiency || {};
+    document.getElementById('efficiencySummary').textContent=`Consultas periódicas a IA evitadas hoy: ${eff.llm_calls_avoided || 0} (comparación con las 2 llamadas del ciclo anterior). Informes agrupados locales: ${eff.summaries || 0}. Los consumos y la disponibilidad se revisan cada minuto.`;
+  } catch(err) {document.getElementById('homeSummary').textContent='Error cargando la supervisión: '+err.message;}
+}
+async function checkVisual(camera) {
+  try { const r=await requestJSON('/api/security-visual/check',{method:'POST',body:JSON.stringify({camera})}); showNotice(r.message); await loadSecurityVisual(); }
+  catch(err) {showNotice(err.message,'error');}
+}
+window.setInterval(()=>{loadHomeMonitor();if(document.querySelector('[data-tab="seguridad"].active'))loadSecurityVisual();},30000);
+async function labelSecurityCase(id, label) {
+  if (!label) return;
+  try { await requestJSON(`/api/security-visual/${id}/label`, {method:'PATCH', body:JSON.stringify({label})}); showNotice('Revisión guardada'); await loadSecurityVisual(); }
+  catch (err) { showNotice(err.message, 'error'); }
 }
 function renderTasks(rows) {
   document.getElementById('selectAllTasks').checked = false;

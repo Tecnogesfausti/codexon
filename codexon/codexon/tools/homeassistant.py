@@ -436,15 +436,16 @@ def merge_learned_entity_rows(context: Any, rows: list[dict[str, Any]], *, query
         return rows
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
+    retired = set(getattr(getattr(context, "site_profile", None), "retired_entities", ()))
     for learned_row in learned:
         entity_id = str(learned_row["entity_id"] or "")
-        if not entity_id or entity_id in seen:
+        if not entity_id or entity_id in seen or entity_id in retired:
             continue
         merged.append(catalog_search_row(learned_row, query=query))
         seen.add(entity_id)
     for row in rows:
         entity_id = str(row.get("entity_id") or "")
-        if not entity_id or entity_id in seen:
+        if not entity_id or entity_id in seen or entity_id in retired:
             continue
         merged.append(row)
         seen.add(entity_id)
@@ -459,6 +460,8 @@ async def fetch_ha_states(context: Any) -> list[dict[str, Any]]:
         states = response.json()
     if not isinstance(states, list):
         return []
+    retired = set(getattr(getattr(context, "site_profile", None), "retired_entities", ()))
+    states = [row for row in states if row.get("entity_id") not in retired]
     enrich_states_with_registry(context, states)
     return states
 
@@ -1322,6 +1325,10 @@ async def ha_get_services(context: Any, args: dict[str, Any]) -> str:
 
 
 async def call_ha_service(context: Any, domain: str, service: str, payload: dict[str, Any], *, timeout: int = 30) -> Any:
+    retired = set(getattr(getattr(context, "site_profile", None), "retired_entities", ()))
+    explicit = payload_entity_ids(payload) + payload_entity_ids(payload.get("target") or {})
+    if retired.intersection(explicit):
+        raise PermissionError("La acción referencia una entidad retirada del perfil local.")
     httpx = httpx_module(context)
     async with httpx.AsyncClient(timeout=timeout) as http:
         response = await http.post(

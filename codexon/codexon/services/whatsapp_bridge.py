@@ -512,7 +512,7 @@ class WhatsAppBridge:
             return False
         sender_jid = str(event.get("from") or "")
         sender = normalize_sender(sender_jid)
-        if self.config.allowed_senders and sender not in self.config.allowed_senders:
+        if not self.config.allowed_senders or sender not in self.config.allowed_senders or sender_jid.endswith("@g.us"):
             self._log("warn", "remitente WhatsApp no permitido", sender=sender_jid)
             return False
         body = str(event.get("body") or "").strip()

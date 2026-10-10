@@ -1360,8 +1360,8 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
         calls: list[tuple[str, dict]] = []
         reschedules: list[dict] = []
         switch_states = {
-            "switch.riego_rele1": "off",
-            "switch.riego_rele2": "off",
+            "switch.riego_rele1": "on",
+            "switch.riego_rele2": "on",
         }
 
         async def fake_call(real_name: str, args: dict) -> str:
@@ -1414,7 +1414,7 @@ class ScheduledLightCycleTest(unittest.IsolatedAsyncioTestCase):
             for name, args in calls
             if name == "__builtin__:ha_call_service"
         ]
-        self.assertEqual(services, [("switch.riego_rele1", "turn_on"), ("switch.riego_rele2", "turn_on")])
+        self.assertEqual(services, [])
         self.assertEqual(switch_states["switch.riego_rele1"], "on")
         self.assertEqual(switch_states["switch.riego_rele2"], "on")
         self.assertEqual(len(reschedules), 1)

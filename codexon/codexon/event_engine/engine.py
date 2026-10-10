@@ -82,6 +82,16 @@ class EventEngine:
 
     async def dispatch(self, event: dict[str, Any]) -> int:
         queued = 0
+        supervisor = getattr(self.agent, "security_visual_supervisor", None)
+        if supervisor is not None:
+            try:
+                supervisor.offer(event)
+            except Exception as exc:
+                self.runtime_log("error", "security_visual", "candidate_failed", error_code=type(exc).__name__)
+        monitor=getattr(self.agent,"home_monitor",None)
+        if monitor is not None:
+            try:monitor.offer(event)
+            except Exception as exc:self.runtime_log("error","home_monitor","event_failed",error_code=type(exc).__name__)
         for row in list_subscriptions(self.memory.conn, enabled_only=True):
             if not event_matches_subscription(row, event):
                 continue
@@ -166,6 +176,11 @@ class EventEngine:
             if subscribed.get("id") != 1 or not subscribed.get("success"):
                 raise RuntimeError(f"No se pudo suscribir al bus de eventos: {subscribed}")
             self.runtime_log("info", "event_engine", "connected")
+            supervisor = getattr(self.agent, "security_visual_supervisor", None)
+            if supervisor is not None:
+                supervisor.connection_status(True)
+            monitor=getattr(self.agent,"home_monitor",None)
+            if monitor is not None:monitor.connection_status(True)
             while not stop.is_set():
                 receive = asyncio.create_task(websocket.recv())
                 stopped = asyncio.create_task(stop.wait())
@@ -191,6 +206,11 @@ class EventEngine:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                supervisor = getattr(self.agent, "security_visual_supervisor", None)
+                if supervisor is not None:
+                    supervisor.connection_status(False)
+                monitor=getattr(self.agent,"home_monitor",None)
+                if monitor is not None:monitor.connection_status(False)
                 self.runtime_log(
                     "warn",
                     "event_engine",

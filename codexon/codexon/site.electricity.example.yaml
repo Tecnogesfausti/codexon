@@ -1,0 +1,16 @@
+version: 1
+timezone: Europe/Madrid  # Ajustar a la zona horaria de este HA.
+roles:
+  energy.circuit.main:
+    entity_id: sensor.main_power  # Potencia instantánea, unidad W.
+    energy_entity: sensor.main_energy  # Contador acumulado, unidad kWh, con estadísticas Recorder.
+    daily_entity: sensor.main_energy_today  # Opcional, kWh del día; eliminar si no existe.
+    label: Consumo general
+    aliases: [consumo eléctrico, consumo de casa]
+  # Opcional: eliminar este role si no hay precio por kWh.
+  energy.price:
+    entity_id: sensor.electricity_price  # €/kWh o EUR/kWh.
+    label: Precio de electricidad
+instructions:
+  - Basa las comparaciones en medidas reales y reconoce la falta de histórico.
+  - Identifica las cargas antes de proponer apagarlas.

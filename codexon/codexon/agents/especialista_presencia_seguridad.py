@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agents._specialist_support import entity_id, friendly_name, is_on, matches_any, resolve_ha_client, state_evidence
+from agents._specialist_support import active_site_states, entity_id, friendly_name, is_on, matches_any, resolve_ha_client, state_evidence
 from agents.base import Agent, AgentContext, AgentFinding, AgentMetadata, AgentRunResult, expires_in, finding_result
 
 
@@ -25,7 +25,7 @@ class EspecialistaPresenciaSeguridadAgent(Agent):
             finding = AgentFinding(self.name, "presence_security", "No puedo leer las señales de presencia.", 0.0, (f"HA: {exc.__class__.__name__}",), urgency="warning", expires_at=expires_in(context.now, 60))
             return finding_result(context, finding, ok=False)
 
-        signals = [row for row in states if entity_id(row).startswith("binary_sensor.") and matches_any(row, SIGNAL_TERMS)]
+        signals = [row for row in active_site_states(context, states) if entity_id(row).startswith("binary_sensor.") and matches_any(row, SIGNAL_TERMS)]
         active = [row for row in signals if is_on(row)]
         unavailable = [row for row in signals if str(row.get("state", "")).lower() in {"unknown", "unavailable"}]
         modalities = {"camera" if matches_any(row, ("camara", "person")) else "radar" if matches_any(row, ("radar", "sonar")) else "infrared" for row in active}

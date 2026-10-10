@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
@@ -16,6 +17,8 @@ class SiteProfile:
     path: Path | None
     roles: dict[str, dict[str, Any]]
     instructions: tuple[str, ...] = ()
+    retired_entities: tuple[str, ...] = ()
+    timezone: str = "UTC"
 
     @classmethod
     def empty(cls) -> "SiteProfile":
@@ -32,6 +35,14 @@ class SiteProfile:
             raise SiteProfileError("El perfil debe ser un objeto YAML.")
         if data.get("version") != 1:
             raise SiteProfileError("El perfil debe declarar version: 1.")
+
+        timezone = data.get("timezone", "UTC")
+        if not isinstance(timezone, str):
+            raise SiteProfileError("timezone debe ser una zona horaria IANA.")
+        try:
+            ZoneInfo(timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise SiteProfileError("timezone debe ser una zona horaria IANA válida.") from exc
 
         raw_roles = data.get("roles") or {}
         if not isinstance(raw_roles, dict):
@@ -53,7 +64,14 @@ class SiteProfile:
         if not isinstance(raw_instructions, list) or not all(isinstance(item, str) for item in raw_instructions):
             raise SiteProfileError("instructions debe ser una lista de textos.")
         instructions = tuple(item.strip() for item in raw_instructions if item.strip())
-        return cls(path=path, roles=roles, instructions=instructions)
+        retired = data.get("retired_entities") or []
+        if not isinstance(retired, list) or not all(isinstance(item, str) and "." in item for item in retired):
+            raise SiteProfileError("retired_entities debe ser una lista de entity_id.")
+        for name, binding in roles.items():
+            configured = [binding.get("entity_id"), *(binding.get("entities") or [])]
+            if any(item in retired for item in configured if item):
+                raise SiteProfileError(f"El role {name!r} referencia una entidad retirada.")
+        return cls(path=path, roles=roles, instructions=instructions, retired_entities=tuple(retired), timezone=timezone)
 
     @staticmethod
     def _validate_binding(name: str, binding: dict[str, Any]) -> None:
@@ -158,7 +176,7 @@ class SiteProfile:
         return matches
 
     def prompt_context(self) -> str:
-        if not self.roles and not self.instructions:
+        if not self.roles and not self.instructions and not self.retired_entities:
             return (
                 "Perfil local: no configurado. Descubre entidades por nombre, area, dominio y "
                 "device_class; pide confirmacion si hay mas de una candidata."
@@ -171,6 +189,8 @@ class SiteProfile:
             suffix = f"; aliases={aliases}" if aliases else ""
             role_lines.append(f"- {role}: {entities} ({label}){suffix}")
         instruction_lines = [f"- {instruction}" for instruction in self.instructions]
+        if self.retired_entities:
+            instruction_lines.append("- Entidades retiradas; no representan dispositivos activos: " + ", ".join(self.retired_entities))
         return "\n".join(
             ["Perfil local activo:", *role_lines, "Reglas locales:", *instruction_lines]
         )

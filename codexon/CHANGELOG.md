@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.17
+
+- Perfil de ejemplo para instalaciones con solo electricidad; agua y cámaras opcionales y zona horaria independiente.
+- Simulacro visual de dos minutos, avisos de voz por detección y resultado IA, sin acciones físicas.
+- Desarmado con parada completa, cancelación manual y deduplicación de avisos Tapo/Frigate.
+- Comparación de pruebas etiquetadas por luz y tiempo informado por HA; detalles colapsados e inconclusos ocultos.
+- Conservación de imágenes configurable (15 días por defecto), consulta de dos días y respaldo Gemini ante retirada del modelo.
+- Ejemplos opcionales de AppDaemon para conservar los cambios de seguridad sin instalarlos en otros hogares.
+
+## 0.3.16
+
+- Diagnóstico de cámaras, detectores y revisiones visible en Resumen; pestañas accesibles en móvil.
+- Eventos y fotografías directos de Frigate, alternativa por movimiento y segunda revisión visual acotada.
+- Evaluación por cámara y día/noche con etiquetas humanas; pruebas excluidas de métricas de detección.
+- Aprendizaje de electricidad por circuito, hora y día con estadísticas de Recorder y escenarios cuantificados de ahorro.
+- Vigilancia del contador real de agua: fugas pequeñas, flujo con relés apagados, caudal excesivo y aprendizaje de sesiones por zona.
+- Observaciones periódicas agrupadas sin consultas repetidas a IA ni extracción automática de memorias.
+
+## 0.3.15
+
+- Añade supervisor visual de cámaras en modo observación, con episodios persistentes, capturas del evento Frigate o secuencias Tapo, respuesta validada, límites diarios, tiempos máximos y registro del uso del modelo visual configurado.
+- Incorpora la pestaña Seguridad visual con imágenes, veredictos y etiquetas de revisión. El piloto conserva las alertas existentes y no ejecuta acciones físicas. Retención de imágenes de 7 días y episodios de 90 días.
+- Admite entidades retiradas en el perfil local; las excluye de agua y presencia y rechaza servicios dirigidos explícitamente a ellas. El especialista de agua reconoce falta de cobertura y datos indisponibles.
+- Actualiza la evidencia y caducidad de los especialistas aunque el resumen no cambie, manteniendo el historial sin duplicados.
+- Las tareas de riego por litros no reabren válvulas detenidas externamente; interrumpen el riego ante contador inválido o retroceso.
+- WhatsApp requiere remitentes autorizados explícitos; una lista vacía rechaza órdenes y los grupos no admiten órdenes.
+
 ## 0.3.14
 
 - La pestaña Archivos y OpenCode habilita Bash y escritura por defecto; se puede desmarcar la casilla para una petición de solo lectura.

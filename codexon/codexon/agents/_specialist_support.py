@@ -18,6 +18,12 @@ def resolve_ha_client(context: Any) -> Any:
     return HomeAssistantRestReader(codexon)
 
 
+def active_site_states(context: Any, states: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    profile = context.services.get("site_profile") or getattr(context.services.get("codexon"), "site_profile", None)
+    retired = set(getattr(profile, "retired_entities", ()))
+    return [row for row in states if entity_id(row) not in retired]
+
+
 def folded(value: Any) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     return "".join(ch for ch in normalized if not unicodedata.combining(ch)).casefold()

@@ -7368,13 +7368,25 @@ Tareas pendientes:
         if not isinstance(required_valve_states, dict):
             raise ValueError("required_valve_states debe ser un objeto entity_id -> estado esperado")
 
-        current = self.numeric_state_from_json(
-            await self.call_builtin_tool("__builtin__:ha_get_state", {"entity_id": meter_entity}),
-            entity_id=meter_entity,
-        )
+        try:
+            current = self.numeric_state_from_json(
+                await self.call_builtin_tool("__builtin__:ha_get_state", {"entity_id": meter_entity}),
+                entity_id=meter_entity,
+            )
+            if not math.isfinite(current):
+                raise ValueError("El contador no es finito")
+        except Exception:
+            if payload.get("baseline_liters") is not None:
+                await self.set_water_switches_state(switch_entity, "turn_off", master_switch=master_switch)
+                await self.restore_appdaemon_manual_water_target(payload)
+            raise RuntimeError("Riego interrumpido: contador sin datos válidos; no se reabre automáticamente.") from None
         now_iso = utc_now()
         baseline = payload.get("baseline_liters")
         if baseline is None:
+            for alarm_entity in alarm_entities:
+                observed = json.loads(await self.call_builtin_tool("__builtin__:ha_get_state", {"entity_id": alarm_entity})).get("state")
+                if str(observed).lower() != "off":
+                    raise RuntimeError(f"Riego no iniciado: alarma activa o sin datos {alarm_entity}.")
             for valve_entity, expected_state in required_valve_states.items():
                 valve_entity_id = str(valve_entity).strip()
                 expected = str(expected_state).strip().lower()
@@ -7399,6 +7411,15 @@ Tareas pendientes:
             payload["started_at"] = now_iso
             payload["last_liters"] = current
             payload["last_progress_at"] = now_iso
+            # Commit intent before the first physical command. A restart must not open again
+            # with a fresh baseline, and a task cancelled before this checkpoint cannot start.
+            memory = getattr(self, "memory", None)
+            if self.current_task_id is not None and getattr(memory, "conn", None) is not None:
+                checkpoint = "DETERMINISTIC_WATER_LITERS " + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+                updated = memory.conn.execute("UPDATE tasks SET instruction=? WHERE id=? AND status='running'", (checkpoint, self.current_task_id)).rowcount
+                memory.conn.commit()
+                if not updated:
+                    raise RuntimeError("Riego no iniciado: la tarea ya no está ejecutándose.")
             if not payload.get("start_notified"):
                 await self.send_water_task_alert(
                     payload,
@@ -7412,6 +7433,10 @@ Tareas pendientes:
                 await self.set_water_switches_state(switch_entity, "turn_on", master_switch=master_switch)
                 await self.wait_water_power_verification(payload, switch_entity, master_switch)
         baseline = float(baseline)
+        if current < baseline - 0.05:
+            await self.set_water_switches_state(switch_entity, "turn_off", master_switch=master_switch)
+            await self.restore_appdaemon_manual_water_target(payload)
+            raise RuntimeError("Riego interrumpido: el contador ha retrocedido; requiere revisión manual.")
         target_value = baseline + target_liters
         delivered = max(0.0, current - baseline)
         last_liters = float(payload.get("last_liters") if payload.get("last_liters") is not None else baseline)
@@ -7423,7 +7448,7 @@ Tareas pendientes:
             alarm_state = json.loads(
                 await self.call_builtin_tool("__builtin__:ha_get_state", {"entity_id": alarm_entity})
             ).get("state")
-            if str(alarm_state).lower() == "on":
+            if str(alarm_state).lower() != "off":
                 await self.set_water_switches_state(switch_entity, "turn_off", master_switch=master_switch)
                 await self.restore_appdaemon_manual_water_target(payload)
                 await self.send_water_task_alert(
@@ -7530,8 +7555,9 @@ Tareas pendientes:
             ).get("state")
             master_is_off = str(master_state).lower() != "on"
         if str(switch_state).lower() != "on" or master_is_off:
-            await self.set_water_switches_state(switch_entity, "turn_on", master_switch=master_switch)
-            await self.wait_water_power_verification(payload, switch_entity, master_switch)
+            await self.set_water_switches_state(switch_entity, "turn_off", master_switch=master_switch)
+            await self.send_water_task_alert(payload, "failure_alert", "Riego interrumpido por parada externa o válvula sin datos; requiere revisión manual.")
+            raise RuntimeError("Riego interrumpido: válvula o relé maestro apagado o sin datos. No se reabre automáticamente.")
         updated_instruction = "DETERMINISTIC_WATER_LITERS " + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         if self.current_task_id is not None:
             await self.reschedule_current_task(
@@ -8483,7 +8509,8 @@ Devuelve una respuesta breve con:
 async def sensor_loop(agent: CodexonAgent, poll_seconds: int, sensor_prompt: str, stop: asyncio.Event) -> None:
     while not stop.is_set():
         try:
-            await agent.observe_sensors(sensor_prompt)
+            from services.home_monitor import observe_snapshot
+            await observe_snapshot(agent)
         except Exception as exc:  # noqa: BLE001
             agent.memory.add_event(level="error", message=f"Fallo en observación de sensores: {exc}")
             print(f"\n[observador] error: {exc}")
@@ -9473,6 +9500,19 @@ async def run_agent_session(
             )
         )
         if config.ha_base_url and config.ha_token:
+            from services.security_visual import SecurityVisualSupervisor, camera_configs
+            from services.home_monitor import HomeMonitor
+
+            agent.home_monitor = HomeMonitor(agent, runtime_log)
+            tasks.append(asyncio.create_task(agent.home_monitor.run(stop)))
+
+            try:
+                visual_configs = camera_configs(agent.site_profile)
+                if visual_configs:
+                    agent.security_visual_supervisor = SecurityVisualSupervisor(agent, log=runtime_log, configs=visual_configs)
+                    tasks.append(asyncio.create_task(agent.security_visual_supervisor.run(stop)))
+            except Exception as exc:
+                runtime_log("error", "security_visual", "configuration_failed", error_code=type(exc).__name__)
             tasks.append(
                 asyncio.create_task(EventEngine(agent, runtime_log=runtime_log).run(stop))
             )

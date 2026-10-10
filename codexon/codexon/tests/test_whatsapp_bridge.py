@@ -22,7 +22,7 @@ def config(**overrides):
         "node_binary": "node",
         "bridge_path": Path("/tmp/bridge.mjs"),
         "data_dir": Path("/tmp/codexon-whatsapp-test"),
-        "allowed_senders": frozenset(),
+        "allowed_senders": frozenset({"34600123123"}),
         "wake_words": (),
         "reject_calls": True,
     }
@@ -88,8 +88,8 @@ class WhatsAppBridgeTests(unittest.TestCase):
             frozenset({"34600123123", "34600999888"}),
         )
 
-    def test_empty_allowlist_accepts_private_incoming_message(self):
-        bridge = WhatsAppBridge(DummyAgent(), config=config())
+    def test_empty_allowlist_rejects_private_incoming_message(self):
+        bridge = WhatsAppBridge(DummyAgent(), config=config(allowed_senders=frozenset()))
         event = {
             "type": "message",
             "source": "notify",
@@ -97,7 +97,7 @@ class WhatsAppBridgeTests(unittest.TestCase):
             "fromMe": False,
             "body": "enciende la luz",
         }
-        self.assertTrue(bridge._accept_message(event))
+        self.assertFalse(bridge._accept_message(event))
 
     def test_filters_history_and_non_allowed_sender(self):
         bridge = WhatsAppBridge(
@@ -118,7 +118,7 @@ class WhatsAppBridgeTests(unittest.TestCase):
             )
         )
 
-    def test_accepts_own_and_group_messages_without_separate_flags(self):
+    def test_accepts_authorized_own_messages_and_rejects_groups(self):
         bridge = WhatsAppBridge(DummyAgent(), config=config())
         base = {
             "type": "message",
@@ -128,7 +128,7 @@ class WhatsAppBridgeTests(unittest.TestCase):
             "body": "estado",
         }
         self.assertTrue(bridge._accept_message({**base, "fromMe": True}))
-        self.assertTrue(
+        self.assertFalse(
             bridge._accept_message({**base, "from": "120363000@g.us"})
         )
 
