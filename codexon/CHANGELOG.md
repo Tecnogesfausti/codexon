@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.18
+
+- Corrige el fallo `s6-overlay-suexec: fatal: can only run as pid 1` al compartir los procesos del host: arranca directamente el entrypoint de Codexon, sin heredar `/init` de S6.
+- Conserva los servicios del complemento, el acceso al host y los datos persistentes.
+
 ## 0.3.17
 
 - Perfil de ejemplo para instalaciones con solo electricidad; agua y cámaras opcionales y zona horaria independiente.

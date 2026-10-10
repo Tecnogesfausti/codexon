@@ -5,7 +5,7 @@ FROM ghcr.io/home-assistant/amd64-base-debian:bookworm
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 ARG BUILD_ARCH=amd64
-ARG BUILD_VERSION=0.3.17
+ARG BUILD_VERSION=0.3.18
 ARG CODEX_NPM_PACKAGE="@openai/codex"
 ARG OPENCODE_NPM_PACKAGE="opencode-ai"
 ARG ESPHOME_PIP_PACKAGE="esphome"
@@ -113,4 +113,7 @@ RUN chmod +x \
   /usr/local/bin/codexon-teach \
   /etc/profile.d/codexon-welcome.sh
 
-CMD ["/usr/local/bin/codexon-entrypoint"]
+# host_pid shares the host PID namespace: inherited /init (S6) cannot be PID 1.
+# The entrypoint starts the services and execs nginx in the foreground.
+ENTRYPOINT ["/usr/local/bin/codexon-entrypoint"]
+CMD []

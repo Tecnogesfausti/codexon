@@ -296,3 +296,7 @@ muestra el coste real frente al estimado.
 ## Instalación con solo electricidad
 
 Usa [el perfil eléctrico de ejemplo](codexon/site.electricity.example.yaml) y adapta los sensores al nuevo HA. [Supervisión del hogar](codexon/docs/home-supervision.md) explica unidades, histórico y módulos opcionales. No se necesitan cámaras, sensores de agua ni AppDaemon para las tareas y el aprendizaje eléctrico.
+
+## Error de arranque S6 / PID 1
+
+Desde 0.3.18 la imagen arranca directamente `codexon-entrypoint`, que inicia los servicios y deja nginx en primer plano. El complemento usa `host_pid: true` y no puede utilizar `/init` de S6 como inicializador. Si aparece `s6-overlay-suexec: fatal: can only run as pid 1` tras actualizar, refresca el catálogo e instala 0.3.18 o posterior. No añadas `init` a las opciones del usuario: es una propiedad de la configuración del complemento.
