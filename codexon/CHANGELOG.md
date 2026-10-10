@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.19
+
+- Añade botones Copiar, Pegar y Ver texto en la terminal web, con texto seleccionable para móviles y navegadores que bloquean el portapapeles.
+- Pegar permite revisar el contenido antes de enviarlo a la terminal y conserva el pegado protegido de xterm.
+- Añade atajos Ctrl+Shift+C y Ctrl+Shift+V sin modificar Ctrl+C para interrumpir procesos.
+
 ## 0.3.18
 
 - Corrige el fallo `s6-overlay-suexec: fatal: can only run as pid 1` al compartir los procesos del host: arranca directamente el entrypoint de Codexon, sin heredar `/init` de S6.

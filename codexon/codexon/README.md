@@ -425,6 +425,8 @@ El add-on mantiene una terminal persistente basada en `ttyd + tmux`, integrada e
 web_terminal_enabled: true
 ```
 
+La barra inferior incluye **Copiar** (selección), **Pegar** (contenido revisable antes de enviarlo) y **Ver texto** (historial seleccionable, útil en móviles). Si el navegador bloquea el portapapeles, permite copiar o pegar manualmente en una ventana de texto. Los atajos Ctrl+Shift+C/V abren estas acciones; Ctrl+C conserva la interrupción de procesos.
+
 La terminal arranca en `workspace` y conserva estado aunque cierres el navegador. Logs:
 
 ```text
