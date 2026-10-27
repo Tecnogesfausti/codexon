@@ -1172,7 +1172,7 @@ def security_area_terms(area: str) -> set[str]:
         return set()
     expanded = set(terms)
     if terms & {"terreno", "huerta", "huerto", "exterior", "fuera", "campo"}:
-        expanded.update({"terreno", "huerta", "huerto", "exterior", "fuera", "cancela", "garrofera", "olivera", "olivo", "almacen", "tiraluzlarga"})
+        expanded.update({"terreno", "huerta", "huerto", "exterior", "fuera", "cancela", "garrofera", "olivera", "olivo", "almacen", "tira_garrofera", "tiragarrofera"})
     if terms & {"casa", "interior", "dentro"}:
         expanded.update({"casa", "interior", "dentro", "salon", "comedor", "oficina", "sonar"})
     return expanded

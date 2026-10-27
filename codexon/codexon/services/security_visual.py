@@ -101,12 +101,12 @@ def camera_configs(profile: Any) -> tuple[CameraConfig, ...]:
             name=role.removeprefix("security.visual."), entity_id=entity,
             presence_entities=tuple(presence), frigate_cameras=tuple(frigate),
             frigate_event_sensor=str(binding.get("frigate_event_sensor") or "sensor.frigate_event"),
-            daily_call_limit=max(1, min(int(binding.get("daily_call_limit", 20)), 100)),
-            cooldown_seconds=max(10, min(int(binding.get("cooldown_seconds", 30)), 300)),
+            daily_call_limit=max(0, int(binding.get("daily_call_limit", 20))),
+            cooldown_seconds=max(0, int(binding.get("cooldown_seconds", 30))),
             max_event_age_seconds=max(5, min(int(binding.get("max_event_age_seconds", 30)), 60)),
             motion_entities=tuple(motion), frigate_base_url=base,
             review_model=str(binding.get("review_model", "")),
-            daily_escalation_limit=max(0,min(int(binding.get("daily_escalation_limit",3)),10)),
+            daily_escalation_limit=max(-1, int(binding.get("daily_escalation_limit",3))),
         ))
     return tuple(result)
 
@@ -269,7 +269,7 @@ def ensure_security_schema(conn: sqlite3.Connection) -> None:
 
 def recent_cases(conn: sqlite3.Connection, limit: int = 50, *, exclude_inconclusive: bool = False, start_timestamp: float | None = None, end_timestamp: float | None = None) -> list[dict[str, Any]]:
     clauses=[];params=[]
-    if exclude_inconclusive:clauses.append("coalesce(json_extract(result_json,'$.visual_verdict'),'') != 'inconclusive'")
+    if exclude_inconclusive:clauses.append("(coalesce(json_extract(result_json,'$.visual_verdict'),'') != 'inconclusive' OR label IS NOT NULL OR json_extract(candidate_json,'$.kind')='historical_check')")
     if start_timestamp is not None:clauses.append("julianday(detected_at)>=julianday(?,'unixepoch')");params.append(start_timestamp)
     if end_timestamp is not None:clauses.append("julianday(detected_at)<julianday(?,'unixepoch')");params.append(end_timestamp)
     where='WHERE '+' AND '.join(clauses) if clauses else ''
@@ -753,7 +753,8 @@ class SecurityVisualSupervisor:
         votes = {}
         for review in self.conn.execute("SELECT * FROM security_visual_reviews WHERE case_id=? AND llm_called=1 AND finished_at IS NOT NULL AND error_code IS NULL", (row["id"],)):
             frames = json.loads(review["frames_json"] or "[]")
-            if not frames or any(f.get("alignment") != "matched" or f.get("frame_time") != frame_time or f.get("source") != "frigate_event" for f in frames):
+            from services.security_visual_sequence import filter_evidence_valid
+            if not filter_evidence_valid(frames, request["event_id"], frame_time):
                 continue
             value = json.loads(review["result_json"] or "{}")
             if value.get("visual_verdict") == "person_visible":

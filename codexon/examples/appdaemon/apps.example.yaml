@@ -5,6 +5,8 @@ CameraSecurity:
   night_arm_switch: input_boolean.vigilancia_noche
   notify: notify/mobile_app_your_phone
   simulacro_button: input_button.simulacro
+  frigate_url: http://frigate:5000
+  home_assistant_config_dir: /homeassistant
   frigate_event_sensor: sensor.frigate_event
   motion_alerts_enabled: false
   person_cooldown: 120

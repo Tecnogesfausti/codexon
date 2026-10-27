@@ -16,7 +16,8 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from starlette.datastructures import UploadFile
 from fastapi.responses import HTMLResponse, FileResponse
 
 from agents.manager import AgentManager
@@ -28,6 +29,9 @@ from event_engine.storage import (
 from scheduler.metrics import scheduler_monitor
 from services.live_context.manager import LiveContextManager
 from services.image_analysis import analyze_image
+from services.multimedia import MultimediaJobs
+from services.chatgpt_image_analysis import analyze_image_with_chatgpt
+from services.codex_subscription import read_subscription_state
 from services.security_visual import camera_configs, ensure_security_schema, recent_cases, set_case_label, enqueue_check, visual_metrics
 from services.security_image_storage import retention_days, validated_days, image_storage, cleanup_images, date_range, put_setting, get_setting as storage_get_setting, archive_options, RETENTION_KEY, RETENTION_ENTITY, FROM_ENTITY, TO_ENTITY, SHOW_ENTITY
 from services.home_monitor import ensure_monitor_schema
@@ -58,6 +62,7 @@ def default_data_dir() -> Path:
 
 
 DATA_DIR = default_data_dir()
+MULTIMEDIA_JOBS = MultimediaJobs(DATA_DIR / "multimedia_jobs")
 DB_PATH = Path(os.getenv("CODEXON_DB", str(DATA_DIR / "codexon_memory.sqlite3")))
 LOG_PATH = Path(os.getenv("CODEXON_LOG_FILE", str(DATA_DIR / "codexon_runtime.log")))
 AGENTS_DIR = Path(os.getenv("CODEXON_AGENTS_DIR", "agents"))
@@ -75,6 +80,26 @@ MODEL_CATALOG_CACHE: dict[str, dict[str, Any]] = {}
 
 app = FastAPI(title="Codexon", version="0.3.19")
 app.include_router(workspace_router)
+
+@app.on_event("startup")
+async def start_visual_subscription_worker():
+    profile = SiteProfile.load(SITE_PROFILE_PATH)
+    if (profile.binding('security.visual_filter') or {}).get('provider') != 'chatgpt':
+        return
+    from services.security_visual_chatgpt import run_visual_worker
+    app.state.visual_stop = asyncio.Event()
+    app.state.visual_task = asyncio.create_task(run_visual_worker(DB_PATH, SITE_PROFILE_PATH, app.state.visual_stop))
+
+
+@app.on_event("shutdown")
+async def stop_visual_subscription_worker():
+    task = getattr(app.state, 'visual_task', None)
+    if task is not None:
+        app.state.visual_stop.set()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
 
 
 @app.middleware("http")
@@ -903,13 +928,56 @@ def api_whatsapp_send(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "task_id": result["id"]}
 
 
+@app.post("/api/multimedia/jobs")
+async def api_multimedia_submit(request: Request) -> dict[str, Any]:
+    try:
+        async with request.form(max_files=1, max_fields=8) as form:
+            upload = form.get("file")
+            if not isinstance(upload, UploadFile):
+                raise ValueError("Selecciona un archivo multimedia")
+            mode = str(form.get("mode") or "analyze")
+            if mode not in {"analyze", "execute"}:
+                raise ValueError("Selecciona analizar o analizar y ejecutar")
+            job = await MULTIMEDIA_JOBS.submit(upload, question=str(form.get("question") or ""),
+                model=str(form.get("model") or "").strip() or None, execute=mode == "execute",
+                frames=int(str(form.get("frames") or "8")))
+            return {"ok": True, "job": job}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/multimedia/jobs/{job_id}")
+def api_multimedia_status(job_id: str) -> dict[str, Any]:
+    try:
+        return {"ok": True, "job": MULTIMEDIA_JOBS.get(job_id)}
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Petición multimedia no encontrada") from exc
+
+
+@app.get("/api/image-analysis/chatgpt")
+async def api_image_analysis_chatgpt_options() -> dict[str, Any]:
+    try:
+        return {"ok": True, **await read_subscription_state(include_models=True)}
+    except (RuntimeError, OSError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="No se pudieron consultar los modelos y el uso de ChatGPT. Comprueba la sesión de Codex.") from exc
+
+
 @app.post("/api/image-analysis")
 async def api_image_analysis(payload: dict[str, Any]) -> dict[str, Any]:
     question = str(payload.get("question") or "").strip()
     media_type = str(payload.get("media_type") or "").lower().strip()
     encoded = str(payload.get("image_base64") or "").strip()
     try:
+        provider = str(payload.get("provider") or "openrouter").strip()
+        if provider not in {"openrouter", "chatgpt"}:
+            raise ValueError("Proveedor de imágenes no válido")
         image_bytes = base64.b64decode(encoded, validate=True)
+        if provider == "chatgpt":
+            result = await analyze_image_with_chatgpt(
+                image_bytes=image_bytes, media_type=media_type, question=question,
+                model=str(payload.get("model") or "").strip() or None,
+            )
+            return {"ok": True, **result}
         router = await build_model_router()
         selected_model = str(get_setting("image_analysis_model") or "").strip()
         metadata = router.model_catalog.get(selected_model) or {}
@@ -1849,7 +1917,7 @@ def index() -> str:
       <button class="tab" data-tab="monitor" onclick="setPage('monitor')">Monitor</button>
       <button class="tab" data-tab="agentes" onclick="setPage('agentes')">Agentes</button>
       <button class="tab" data-tab="seguridad" onclick="setPage('seguridad')">Seguridad visual</button>
-      <button class="tab" data-tab="imagenes" onclick="setPage('imagenes')">Análisis de imágenes</button>
+      <button class="tab" data-tab="imagenes" onclick="setPage('imagenes')">Multimedia</button>
       <button class="tab" data-tab="whatsapp" onclick="setPage('whatsapp')">Conexión WhatsApp</button>
       <button class="tab" data-tab="sistema" onclick="setPage('sistema')">Sistema</button>
     </nav>
@@ -1980,22 +2048,46 @@ def index() -> str:
         <button class="ghost" onclick="setPage('whatsapp')">Abrir conexión</button>
       </section>
       <section class="full" data-page="imagenes">
-        <h2>Análisis de imágenes</h2>
-        <p class="muted">Sube una foto y formula una pregunta concreta sobre ella.</p>
+        <h2>Multimedia · imágenes, audio y vídeo</h2>
+        <p class="muted">Sube una foto, una grabación de voz o un vídeo. Puedes analizarlo o pedir acciones en Home Assistant.</p>
         <div class="grid" style="margin-top:12px">
           <div class="side">
-            <label>Imagen<input id="imageAnalysisFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif" onchange="previewAnalysisImage()" /></label>
-            <button class="secondary" style="margin-top:8px" onclick="document.getElementById('imageAnalysisFile').click()">Sube imagen</button>
+            <label>Archivo multimedia<input id="imageAnalysisFile" type="file" accept="image/*,audio/*,video/*" onchange="previewAnalysisImage()" /></label>
+            <button class="secondary" style="margin-top:8px" onclick="document.getElementById('imageAnalysisFile').click()">Subir archivo multimedia</button>
+            <p class="muted">Hasta 100 MB y 10 minutos. Formatos habituales de imagen, audio y vídeo. El vídeo se analiza mediante fotogramas y su audio; la voz se transcribe con Whisper local.</p>
+            <audio id="multimediaAudioPreview" controls style="display:none;width:100%;margin-top:12px"></audio>
+            <video id="multimediaVideoPreview" controls style="display:none;width:100%;max-height:480px;margin-top:12px"></video>
             <img id="imageAnalysisPreview" alt="Vista previa de la imagen" style="display:none;width:100%;max-height:480px;object-fit:contain;margin-top:12px;border-radius:8px;background:#eef2f0" />
           </div>
           <div class="wide">
-            <label>Pregunta acerca de la foto<textarea id="imageAnalysisQuestion" maxlength="4000" placeholder="¿Qué aparece en la imagen?"></textarea></label>
-            <button id="imageAnalysisButton" style="margin-top:8px" onclick="submitImageAnalysis()">Analizar imagen</button>
+            <label>Analizar con<select id="imageAnalysisProvider" onchange="updateImageAnalysisProvider()"><option value="chatgpt">ChatGPT · suscripción</option><option value="openrouter">OpenRouter · solo fotos</option></select></label>
+            <p id="imageAnalysisProviderHelp" class="muted">Usa la sesión de ChatGPT de Codex y cuenta para el límite de tu suscripción.</p>
+            <div id="imageAnalysisChatGPTControls">
+              <label>Modelo de ChatGPT<select id="imageAnalysisChatGPTModel" onchange="saveImageAnalysisModel()" disabled><option value="">Cargando modelos…</option></select></label>
+              <p class="muted">Se usa razonamiento bajo cuando el modelo lo permite, para facilitar la comparación.</p>
+              <div class="toolbar"><button type="button" class="secondary" onclick="loadImageAnalysisOptions()">Actualizar modelos y uso</button></div>
+              <p id="imageAnalysisQuota" class="muted">Uso de la suscripción pendiente de consultar.</p>
+            </div>
+            <label>Modo<select id="multimediaMode" onchange="updateMultimediaMode()"><option value="analyze">Solo analizar</option><option value="execute">Analizar y ejecutar mi petición</option></select></label>
+            <label>Petición<textarea id="imageAnalysisQuestion" maxlength="4000" placeholder="Describe lo que sucede, o indica qué acción quieres ejecutar. Puedes dejarlo vacío si la petición está en tu audio."></textarea></label>
+            <label>Fotogramas del vídeo<select id="multimediaFrames"><option value="4">4 · menos consumo</option><option value="8" selected>8 · equilibrado</option><option value="12">12 · más detalle</option></select></label>
+            <p id="multimediaModeHelp" class="muted">Recibirás una descripción y la transcripción del audio.</p>
+            <button id="imageAnalysisButton" style="margin-top:8px" onclick="submitImageAnalysis()">Analizar multimedia</button>
             <h3>Respuesta</h3>
             <pre id="imageAnalysisAnswer" style="min-height:140px;white-space:pre-wrap">Todavía no hay respuesta.</pre>
             <p id="imageAnalysisModel" class="muted"></p>
+            <pre id="imageAnalysisUsage" style="display:none;white-space:pre-wrap"></pre>
+            <pre id="multimediaTranscript" style="display:none;white-space:pre-wrap"></pre>
+            <pre id="multimediaActions" style="display:none;white-space:pre-wrap"></pre>
           </div>
         </div>
+      </section>
+      <section class="full" data-page="imagenes">
+        <h2>Comparación de consumo · ChatGPT</h2>
+        <p class="muted">Repite el mismo archivo y petición con distintos modelos en modo Solo analizar. Los tokens incluyen las instrucciones, la foto y la respuesta; no son un precio en euros. El porcentaje de cuota puede actualizarse con retraso y también incluye otros usos de tu cuenta.</p>
+        <p class="muted">Las últimas 30 mediciones se guardan en este navegador, sin guardar los archivos ni las preguntas.</p>
+        <div style="overflow-x:auto"><table><thead><tr><th>Hora</th><th>Modelo</th><th>Entrada</th><th>En caché</th><th>Salida</th><th>Total tokens</th><th>Segundos</th><th>Cuota antes → después</th></tr></thead><tbody id="imageAnalysisHistory"></tbody></table></div>
+        <button type="button" class="secondary" onclick="clearImageAnalysisHistory()">Borrar mediciones</button>
       </section>
       <section class="full" data-page="whatsapp">
         <h2>Conexión WhatsApp</h2>
@@ -2034,12 +2126,16 @@ async function requestJSON(url, options = {}) {
   if (!r.ok) throw new Error(data.detail || url);
   return data;
 }
+let multimediaPreviewURL = null;
 function previewAnalysisImage() {
+  if (multimediaPreviewURL) URL.revokeObjectURL(multimediaPreviewURL);
   const file = document.getElementById('imageAnalysisFile').files[0];
-  const preview = document.getElementById('imageAnalysisPreview');
-  if (!file) { preview.style.display = 'none'; preview.removeAttribute('src'); return; }
-  preview.src = URL.createObjectURL(file);
-  preview.style.display = 'block';
+  const previews = ['imageAnalysisPreview', 'multimediaAudioPreview', 'multimediaVideoPreview'];
+  for (const id of previews) { const node = document.getElementById(id); node.style.display = 'none'; node.removeAttribute('src'); }
+  if (!file) return;
+  multimediaPreviewURL = URL.createObjectURL(file);
+  const id = file.type.startsWith('audio/') ? 'multimediaAudioPreview' : file.type.startsWith('video/') ? 'multimediaVideoPreview' : file.type.startsWith('image/') ? 'imageAnalysisPreview' : null;
+  if (id) { const node = document.getElementById(id); node.src = multimediaPreviewURL; node.style.display = 'block'; }
 }
 function fileAsBase64(file) {
   return new Promise((resolve, reject) => {
@@ -2049,25 +2145,206 @@ function fileAsBase64(file) {
     reader.readAsDataURL(file);
   });
 }
+let imageAnalysisOptionsLoading = false;
+function imageUsageNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('es-ES') : 'No disponible';
+}
+function imageQuotaWindowLabel(window) {
+  const mins = window.duration_minutes;
+  const duration = mins === 10080 ? 'Semanal' : mins === 300 ? '5 horas' : mins ? mins + ' min' : 'Ventana';
+  return (window.bucket !== 'codex' ? window.bucket_name + ' · ' : '') + duration;
+}
+function renderImageAnalysisQuota(quota) {
+  const node = document.getElementById('imageAnalysisQuota');
+  const windows = quota?.windows || [];
+  if (!windows.length) { node.textContent = 'Porcentaje de uso no disponible para esta cuenta.'; return; }
+  node.textContent = windows.map(window => {
+    const reset = window.resets_at ? ' · se renueva ' + new Date(window.resets_at * 1000).toLocaleString('es-ES') : '';
+    return imageQuotaWindowLabel(window) + ': ' + imageUsageNumber(window.used_percent) + '% usado' + reset;
+  }).join(' | ');
+}
+async function loadImageAnalysisOptions() {
+  if (imageAnalysisOptionsLoading) return;
+  imageAnalysisOptionsLoading = true;
+  const select = document.getElementById('imageAnalysisChatGPTModel');
+  const prior = select.value;
+  select.disabled = true;
+  try {
+    const data = await requestJSON('/api/image-analysis/chatgpt');
+    let saved = '';
+    try { saved = localStorage.getItem('codexon.imageAnalysis.model') || ''; } catch (_) {}
+    const preferred = prior || saved || data.default_model;
+    select.innerHTML = data.models.map(model => `<option value="${html(model.id)}">${html(model.name)}</option>`).join('');
+    select.value = data.models.some(model => model.id === preferred) ? preferred : data.default_model;
+    renderImageAnalysisQuota(data.quota);
+    if (data.quota_error) document.getElementById('imageAnalysisQuota').textContent = data.quota_error;
+  } catch (err) {
+    document.getElementById('imageAnalysisQuota').textContent = err.message;
+  } finally {
+    select.disabled = !select.value;
+    imageAnalysisOptionsLoading = false;
+  }
+}
+function saveImageAnalysisModel() {
+  try { localStorage.setItem('codexon.imageAnalysis.model', document.getElementById('imageAnalysisChatGPTModel').value); } catch (_) {}
+}
+function imageQuotaChangesText(changes) {
+  if (!changes?.length) return 'Cuota antes → después: no disponible.';
+  return changes.map(change => {
+    let delta;
+    if (change.reset_or_changed || change.delta_percentage_points === null) delta = 'ventana reiniciada o modificada; sin diferencia comparable';
+    else if (change.delta_percentage_points === 0) delta = 'sin cambio visible; el porcentaje puede estar redondeado o pendiente de actualizar';
+    else delta = '+' + imageUsageNumber(change.delta_percentage_points) + ' puntos porcentuales observados en la cuenta';
+    return imageQuotaWindowLabel(change) + ': ' + imageUsageNumber(change.before_percent) + '% → ' + imageUsageNumber(change.after_percent) + '% (' + delta + ')';
+  }).join('\\n');
+}
+function readImageAnalysisHistory() {
+  try {
+    const rows = JSON.parse(localStorage.getItem('codexon.imageAnalysis.measurements') || '[]');
+    return Array.isArray(rows) ? rows.filter(row => row && typeof row === 'object').slice(0, 30) : [];
+  } catch (_) { return []; }
+}
+function saveImageAnalysisMeasurement(result) {
+  const rows = readImageAnalysisHistory();
+  if (result.job_id && rows.some(row => row.job_id === result.job_id)) return;
+  rows.unshift({job_id: result.job_id, at: new Date().toISOString(), model: result.model, usage: result.usage,
+    elapsed_seconds: result.elapsed_seconds, quota_changes: result.quota_changes});
+  try { localStorage.setItem('codexon.imageAnalysis.measurements', JSON.stringify(rows.slice(0, 30))); }
+  catch (_) { showNotice('El navegador no permite guardar la medición; los datos aparecen bajo la respuesta.', 'error'); }
+  renderImageAnalysisHistory();
+}
+function renderImageAnalysisHistory() {
+  const rows = readImageAnalysisHistory();
+  const tbody = document.getElementById('imageAnalysisHistory');
+  tbody.innerHTML = rows.length ? rows.map(row => {
+    const usage = row.usage || {};
+    const columns = [new Date(row.at).toLocaleString('es-ES'), row.model,
+      imageUsageNumber(usage.input_tokens), imageUsageNumber(usage.cached_input_tokens),
+      imageUsageNumber(usage.output_tokens), imageUsageNumber(usage.total_tokens),
+      imageUsageNumber(row.elapsed_seconds), imageQuotaChangesText(row.quota_changes)];
+    return '<tr>' + columns.map(value => '<td style="white-space:pre-wrap">' + html(value) + '</td>').join('') + '</tr>';
+  }).join('') : '<tr><td colspan="8">Todavía no hay mediciones. Analiza una foto con ChatGPT para empezar.</td></tr>';
+}
+function clearImageAnalysisHistory() {
+  try { localStorage.removeItem('codexon.imageAnalysis.measurements'); } catch (_) {}
+  renderImageAnalysisHistory();
+}
+
+function updateImageAnalysisProvider() {
+  const chatgpt = document.getElementById('imageAnalysisProvider').value === 'chatgpt';
+  document.getElementById('imageAnalysisChatGPTControls').hidden = !chatgpt;
+  document.getElementById('imageAnalysisProviderHelp').textContent = chatgpt
+    ? 'Usa la sesión de ChatGPT de Codex y cuenta para el límite de tu suscripción.'
+    : 'Usa el modelo seleccionado en Modelos → Análisis de imágenes y la cuenta de OpenRouter.';
+}
+let multimediaPolling = false;
+function updateMultimediaMode() {
+  const execute = document.getElementById('multimediaMode').value === 'execute';
+  document.getElementById('imageAnalysisButton').textContent = execute ? 'Analizar y ejecutar mi petición' : 'Analizar multimedia';
+  document.getElementById('multimediaModeHelp').textContent = execute
+    ? 'Al pulsar el botón autorizas las acciones que pides por escrito o, si lo dejas vacío, con tu voz en el archivo. Se registrarán las llamadas y sus resultados.'
+    : 'Recibirás una descripción y la transcripción del audio.';
+}
+function showMultimediaResult(result) {
+  document.getElementById('imageAnalysisAnswer').textContent = result.answer || result.error || 'Sin respuesta.';
+  document.getElementById('imageAnalysisModel').textContent = result.model ? (result.provider === 'chatgpt' ? 'ChatGPT · suscripción' : 'OpenRouter') + ' · Modelo: ' + result.model : '';
+  const transcript = document.getElementById('multimediaTranscript');
+  transcript.textContent = result.transcript ? 'Transcripción del audio:\\n' + result.transcript : '';
+  transcript.style.display = result.transcript ? 'block' : 'none';
+  const actionNode = document.getElementById('multimediaActions');
+  if (Array.isArray(result.actions)) {
+    actionNode.textContent = result.actions.length ? 'Registro de acciones en Home Assistant:\\n' + result.actions.map(action => {
+      const label = action.status === 'accepted' ? 'ACEPTADA POR HOME ASSISTANT' : action.status === 'requested' ? 'RESULTADO SIN CONFIRMAR' : 'ERROR O RESULTADO INCIERTO';
+      const states = (action.observed_states || []).map(state => state.entity_id + ': ' + state.state).join(', ');
+      return label + ' · ' + action.domain + '.' + action.service + ' · ' + (action.entity_ids || []).join(', ') + '\\n' + action.reason + (states ? '\\nEstado observado: ' + states : '') + (action.error ? '\\n' + action.error : '');
+    }).join('\\n\\n') : 'No se ha llamado a ningún servicio de Home Assistant.';
+    actionNode.style.display = 'block';
+  } else actionNode.style.display = 'none';
+  if (result.tool_errors?.length) { actionNode.textContent += '\\n\\nErrores de herramientas:\\n' + result.tool_errors.join('\\n'); actionNode.style.display = 'block'; }
+  if (result.provider === 'chatgpt') {
+    const usage = result.usage || {};
+    const lines = [
+      'Tokens de entrada: ' + imageUsageNumber(usage.input_tokens) + ' · En caché: ' + imageUsageNumber(usage.cached_input_tokens),
+      'Tokens de salida: ' + imageUsageNumber(usage.output_tokens) + ' · Total: ' + imageUsageNumber(usage.total_tokens),
+      'Duración del análisis: ' + imageUsageNumber(result.elapsed_seconds) + ' s · Razonamiento: ' + result.reasoning_effort,
+      imageQuotaChangesText(result.quota_changes),
+    ];
+    if (result.media) lines.unshift('Archivo: ' + result.media.kind + ' · ' + result.media.duration_seconds + ' s · ' + result.media.frames + ' fotogramas');
+    if (result.quota_error) lines.push(result.quota_error);
+    const node = document.getElementById('imageAnalysisUsage');
+    node.textContent = lines.join('\\n');
+    node.style.display = 'block';
+    if (result.quota_after) renderImageAnalysisQuota(result.quota_after);
+    if (result.usage) saveImageAnalysisMeasurement(result);
+  }
+}
+async function waitMultimediaJob(id) {
+  if (multimediaPolling) return;
+  multimediaPolling = true;
+  document.getElementById('imageAnalysisButton').disabled = true;
+  try {
+    while (true) {
+      const response = await requestJSON('/api/multimedia/jobs/' + encodeURIComponent(id));
+      const job = response.job;
+      document.getElementById('imageAnalysisAnswer').textContent = job.message;
+      if (!['queued', 'running'].includes(job.status)) {
+        if (job.result) showMultimediaResult({...job.result, job_id: job.id});
+        showNotice(job.status === 'completed' ? 'Petición multimedia completada' : job.message, job.status === 'completed' ? 'ok' : 'error');
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  } catch (err) {
+    document.getElementById('imageAnalysisAnswer').textContent = err.message + '\\nLa petición puede seguir en curso. Recarga la página para consultar su resultado antes de enviarla otra vez.';
+    showNotice(err.message, 'error');
+  } finally {
+    multimediaPolling = false;
+    document.getElementById('imageAnalysisButton').disabled = false;
+  }
+}
+function resumeMultimediaJob() {
+  if (multimediaPolling) return;
+  try { const id = localStorage.getItem('codexon.multimedia.lastJob'); if (id) waitMultimediaJob(id); } catch (_) {}
+}
 async function submitImageAnalysis() {
   const file = document.getElementById('imageAnalysisFile').files[0];
   const question = document.getElementById('imageAnalysisQuestion').value.trim();
-  if (!file || !question) { showNotice('Selecciona una imagen y escribe una pregunta', 'error'); return; }
+  const provider = document.getElementById('imageAnalysisProvider').value;
+  const selectedModel = document.getElementById('imageAnalysisChatGPTModel').value;
+  const mode = document.getElementById('multimediaMode').value;
+  if (!file) { showNotice('Selecciona un archivo multimedia', 'error'); return; }
+  if (file.size > 100 * 1024 * 1024) { showNotice('El archivo supera los 100 MB', 'error'); return; }
+  if (provider === 'chatgpt' && !selectedModel) { showNotice('Espera a que se carguen los modelos o pulsa Actualizar modelos y uso', 'error'); return; }
+  if (provider === 'openrouter' && (mode === 'execute' || !file.type.startsWith('image/'))) { showNotice('Selecciona ChatGPT para audio, vídeo o ejecución de acciones.', 'error'); return; }
   const button = document.getElementById('imageAnalysisButton');
   button.disabled = true;
-  document.getElementById('imageAnalysisAnswer').textContent = 'Analizando…';
+  document.getElementById('imageAnalysisAnswer').textContent = 'Subiendo archivo…';
+  document.getElementById('imageAnalysisModel').textContent = '';
+  for (const id of ['imageAnalysisUsage', 'multimediaTranscript', 'multimediaActions']) document.getElementById(id).style.display = 'none';
   try {
-    const result = await requestJSON('/api/image-analysis', {method: 'POST', body: JSON.stringify({
-      question, media_type: file.type, image_base64: await fileAsBase64(file)
-    })});
-    document.getElementById('imageAnalysisAnswer').textContent = result.answer;
-    document.getElementById('imageAnalysisModel').textContent = 'Modelo: ' + result.model;
-    showNotice('Análisis completado');
+    if (provider === 'openrouter') {
+      const result = await requestJSON('/api/image-analysis', {method: 'POST', body: JSON.stringify({
+        question: question || 'Describe la imagen.', provider, media_type: file.type, image_base64: await fileAsBase64(file)
+      })});
+      showMultimediaResult(result);
+      showNotice('Análisis completado');
+    } else {
+      const form = new FormData();
+      form.append('file', file); form.append('question', question); form.append('model', selectedModel);
+      form.append('mode', mode); form.append('frames', document.getElementById('multimediaFrames').value);
+      const response = await fetch('/api/multimedia/jobs', {method: 'POST', body: form});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'No se pudo subir el archivo');
+      try { localStorage.setItem('codexon.multimedia.lastJob', data.job.id); } catch (_) {}
+      await waitMultimediaJob(data.job.id);
+    }
   } catch (err) {
     document.getElementById('imageAnalysisAnswer').textContent = err.message;
     showNotice(err.message, 'error');
-  } finally { button.disabled = false; }
+  } finally { if (!multimediaPolling) button.disabled = false; }
 }
+
+
 function text(v) { return v === null || v === undefined || v === '' ? '-' : String(v); }
 function html(v) { return text(v).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
 const modelState = {page: 1, totalPages: 1, loading: false};
@@ -2088,6 +2365,7 @@ function setPage(name) {
   document.querySelectorAll('[data-page]').forEach(node => node.classList.toggle('active', node.dataset.page === name));
   document.querySelectorAll('.tab').forEach(node => node.classList.toggle('active', node.dataset.tab === name));
   if (name === 'modelos') loadModels();
+  if (name === 'imagenes') { renderImageAnalysisHistory(); loadImageAnalysisOptions(); resumeMultimediaJob(); }
   if (name === 'tareas') loadTasks();
   if (name === 'agentes') loadAgents();
   if (name === 'seguridad') { loadSecurityVisual(); loadHomeMonitor(); }
@@ -2339,7 +2617,7 @@ async function startVisualSimulacro() {
 }
 async function loadSecurityVisual() {
   try {
-    const params=new URLSearchParams({hide_inconclusive:'true',limit:'2000',...(visualDateRange || {})});
+    const params=new URLSearchParams({hide_inconclusive:'false',limit:'2000',...(visualDateRange || {})});
     const data = await requestJSON('/api/security-visual?'+params);
     const selection=data.browse_selection;
     if (visualSelectionSeen === null) visualSelectionSeen=selection?.requested_at || '';
@@ -2354,7 +2632,9 @@ async function loadSecurityVisual() {
     }
     document.getElementById('visualDateStatus').textContent=`Del ${data.date_range.from_date} al ${data.date_range.to_date}, ambos incluidos · ${data.cases.length} episodios · ${data.date_range.timezone}`;
     document.getElementById('visualStorage').textContent=`${data.storage.files} imágenes · ${(data.storage.bytes/1048576).toFixed(2)} MiB · conservación ${data.image_retention_days} días${data.storage.appdaemon_files !== undefined ? ' · '+data.storage.codexon_files+' de Codexon + '+data.storage.appdaemon_files+' de avisos' : ''}`;
-    document.getElementById('visualModeDescription').textContent = data.mode === 'conservative_filter' ? 'Filtro activo: solo descarta avisos Frigate con dos modelos y una foto verificada del evento. Espera máxima 15 s. Tapo y sensores físicos conservan avisos inmediatos.' : 'Modo observación: los resultados no descartan avisos.';
+    const filterConfig=JSON.parse(data.health['security_visual.filter_config'] || '{}');
+    const waitSeconds=Number(filterConfig.timeout_seconds || 30);
+    document.getElementById('visualModeDescription').textContent = data.mode === 'conservative_filter' ? `Filtro activo: solo descarta avisos Frigate con dos modelos y una foto verificada del evento. Espera máxima ${waitSeconds} s. Tapo y sensores físicos conservan avisos inmediatos.` : 'Modo observación: los resultados no descartan avisos.';
     const drill=JSON.parse(data.health['security_visual.simulacro'] || '{}');
     const drillActive=drill.state === 'en_curso' && Number(drill.ends_at)*1000 > Date.now();
     if(drillActive){visualSimulacroAwaitingStartUntil=0;visualSimulacroPollingUntil=Math.max(visualSimulacroPollingUntil,Number(drill.ends_at)*1000+15000);scheduleVisualSimulacroRefresh();}
@@ -2365,21 +2645,21 @@ async function loadSecurityVisual() {
     const fresh = heartbeat && Date.now() - Date.parse(heartbeat) < 90000;
     const connection = JSON.parse(data.health['security_visual.connection'] || '{}');
     const personIcon = '<svg role="img" aria-label="Persona detectada" viewBox="0 0 24 24" width="22" height="22" style="color:#dc2626;vertical-align:middle;margin-left:6px" fill="currentColor"><title>Persona detectada</title><circle cx="12" cy="4" r="3"/><path d="M8 8h8l3 7-2 1-2-4v10h-2v-6h-2v6H9V12l-2 4-2-1z"/></svg>';
-    const verdicts = {supported_false_positive: 'Falsa detección sustentada'};
-    document.getElementById('visualSummary').textContent = `${data.cameras.map(c => c.name).join(', ') || 'Sin cámaras activas'} · ${fresh ? 'Supervisor activo' : 'Sin señal reciente del supervisor'} · ${connection.connected ? 'Eventos conectados' : 'Sin conexión de eventos confirmada'} · ${data.usage.calls} análisis · coste estimado $${Number(data.usage.estimated_cost_usd).toFixed(5)} · ${data.would_filter_real_person} personas etiquetadas que se habrían filtrado${data.config_error ? ' · ' + data.config_error : ''}`;
+    const verdicts = {supported_false_positive: 'Falsa detección sustentada', inconclusive: 'Sin confirmar: aviso conservado'};
+    document.getElementById('visualSummary').textContent = `${data.cameras.map(c => c.name).join(', ') || 'Sin cámaras activas'} · ${fresh ? 'Supervisor activo' : 'Sin señal reciente del supervisor'} · ${connection.connected ? 'Eventos conectados' : 'Sin conexión de eventos confirmada'} · ${data.usage.calls} análisis · ${filterConfig.provider === 'chatgpt' ? 'consumo de la suscripción ChatGPT' : 'coste estimado $'+Number(data.usage.estimated_cost_usd).toFixed(5)} · ${data.would_filter_real_person} personas etiquetadas que se habrían filtrado${data.config_error ? ' · ' + data.config_error : ''}`;
     document.getElementById('visualSummary').textContent += ` · ${data.metrics.labeled_cases} episodios etiquetados · evaluación ${data.metrics.calibration_ready ? 'con muestras suficientes' : 'en aprendizaje'}`;
     const modelSelection=JSON.parse(data.health['security_visual.model_selection'] || '{}');
-    if (modelSelection.effective_model) document.getElementById('visualSummary').textContent += ` · IA de seguridad: ${modelSelection.effective_model}${modelSelection.fallback_reason ? ' (respaldo compatible)' : ''}`;
+    if (modelSelection.effective_model) document.getElementById('visualSummary').textContent += ` · IA de seguridad: ${modelSelection.effective_model}${modelSelection.provider === 'chatgpt' ? ' · suscripción ChatGPT · razonamiento alto' : ''}${modelSelection.fallback_reason ? ' (respaldo compatible)' : ''}`;
     const aiStatus=JSON.parse(data.health['security_visual.ai_status'] || '{}');
     if (aiStatus.state === 'error') document.getElementById('visualSummary').textContent += ' · Falló la última revisión de IA; avisos de sensores conservados';
-    const modelNotice=JSON.parse(data.health['security_visual.model_removal_notice'] || '{}');
+    const modelNotice=modelSelection.provider === 'chatgpt' ? {} : JSON.parse(data.health['security_visual.model_removal_notice'] || '{}');
     if (modelNotice.model && !modelNotice.resolved) document.getElementById('visualSummary').textContent += ` · Modelo retirado del catálogo: ${modelNotice.model}${modelNotice.sent ? ' · aviso enviado a HA' : ' · aviso a HA pendiente'}`;
     const arming = JSON.parse(data.health['security_visual.arming'] || '{}');
     if (drillActive) { document.getElementById('visualSummary').textContent += ' · Simulacro: revisión IA de todas las cámaras, sin acciones físicas'; } else if (arming.enabled) {
       const active = Object.entries(arming.cameras || {}).filter(([camera, mode]) => mode === 'total' || mode === 'night');
       document.getElementById('visualSummary').textContent += arming.unknown ? ' · Armado sin confirmar: revisión conservada ante detecciones' : active.length ? ' · Revisión IA activa: ' + active.map(([camera, mode]) => camera + ' (' + (mode === 'total' ? 'total' : 'nocturna') + ')').join(', ') : ' · Desarmado: IA automática en pausa; detección local activa';
     }
-    if (data.mode === 'conservative_filter') document.getElementById('visualSummary').textContent += ' · Filtro activo de Frigate: espera máxima 15 s · ' + Number(data.filter_outcomes?.suppressed || 0) + ' avisos descartados';
+    if (data.mode === 'conservative_filter') document.getElementById('visualSummary').textContent += ` · Filtro activo de Frigate: espera máxima ${waitSeconds} s · ` + Number(data.filter_outcomes?.suppressed || 0) + ' avisos descartados';
     const groups = data.metrics.groups.filter(g => g.verdict !== 'inconclusive');
     document.getElementById('visualMetrics').innerHTML = groups.length ? `<div class="table-scroll"><table><thead><tr><th>Cámara</th><th>Luz</th><th>Etiqueta humana</th><th>Resultado visual</th><th>Episodios</th></tr></thead><tbody>${groups.map(g=>`<tr><td>${html(g.camera)}</td><td>${html({day:'Día',night:'Noche',unknown:'Sin dato'}[g.light_context] || g.light_context)}</td><td>${html(g.label)}</td><td>${g.verdict === 'person_visible' ? personIcon : html(verdicts[g.verdict] || 'Pendiente')}</td><td>${g.count}</td></tr>`).join('')}</tbody></table></div><p>Causas propuestas por el modelo en falsas detecciones etiquetadas: ${html(JSON.stringify(data.metrics.model_described_causes))}</p>` : '<p>Etiqueta episodios reales para medir los falsos positivos por cámara y día/noche. Las comprobaciones de instalación no cuentan.</p>';
     const weatherGroups = (data.metrics.weather_groups || []).filter(g => g.weather_context !== 'unknown' && g.verdict !== 'inconclusive');
@@ -2387,12 +2667,13 @@ async function loadSecurityVisual() {
     if (weatherGroups.length) document.getElementById('visualMetrics').innerHTML += `<details><summary>Comparar por tiempo informado por HA</summary><div class="table-scroll"><table><thead><tr><th>Cámara</th><th>Tiempo</th><th>Etiqueta humana</th><th>Resultado</th><th>Episodios</th></tr></thead><tbody>${weatherGroups.map(g=>`<tr><td>${html(g.camera)}</td><td>${html(weatherNames[g.weather_context] || g.weather_context)}</td><td>${html(g.label)}</td><td>${g.verdict === 'person_visible' ? personIcon : html(verdicts[g.verdict] || 'Pendiente')}</td><td>${g.count}</td></tr>`).join('')}</tbody></table></div></details>`;
 
     document.getElementById('visualChecks').innerHTML = data.cameras.map(c => `<button class="ghost" onclick="checkVisual('${html(c.name)}')">Comprobar foto e IA: ${html(c.name)}</button>`).join('');
-    const cases = data.cases.filter(c => c.result?.visual_verdict !== 'inconclusive');
+    const cases = data.cases.filter(c => c.label || c.candidate.kind === 'historical_check' || c.result?.visual_verdict !== 'inconclusive');
     document.getElementById('visualCases').innerHTML = cases.length ? cases.map(c => {
       const v = c.result;
       const latest = (c.reviews || [])[0];
-      const frames=(latest?.frames || []).filter(f=>f.available !== false);
-      return `<article class="stat" style="margin-top:12px"><strong style="font-size:1rem">#${c.id}${v?.visual_verdict === 'person_visible' ? personIcon : ''} · ${c.candidate.kind === 'installation_check' ? 'Comprobación de instalación · ' : c.candidate.kind === 'historical_check' ? 'Comprobación histórica real · ' : c.candidate.kind === 'simulacro' ? 'Simulacro · ' : ''}${html(c.camera)} · ${html(c.detected_at)}</strong>${v?.visual_verdict === 'person_visible' ? '' : `<p>${html(v ? verdicts[v.visual_verdict] : 'Pendiente de revisión')}</p>`}<div style="margin-top:10px">${frames.length ? frames.map(f => `<a href="${html(f.url)}" target="_blank" rel="noopener"><img src="${html(f.url)}" alt="Fotograma revisado del episodio ${c.id}" loading="lazy" style="max-width:280px;max-height:180px;margin-right:8px" /></a>`).join('') : latest?.frames.length ? '<p class="muted">Imágenes caducadas o no disponibles.</p>' : ''}</div><details style="margin-top:10px"><summary>Detalles</summary>${c.candidate.kind === 'simulacro' ? `<p>Prueba de detección · luz: ${html(c.candidate.light_context || 'sin dato')} · tiempo informado por HA: ${html(c.candidate.environment?.['weather.aemet']?.state || c.candidate.environment?.['weather.casa']?.state || 'sin dato')}</p>` : ''}${c.filter_outcomes?.length ? `<p>Aviso Frigate: ${html(c.filter_outcomes.map(o=>({suppressed:'descartado por el filtro',notified:'enviado',timeout:'enviado al agotar la espera',already_notified:'ya enviado por otro detector',disarmed:'desarmado durante la espera',invalid_result:'aviso conservado'}[o.outcome] || 'pendiente')).join(' · '))}</p>` : ''}<p>${html(v ? [...v.observations, ...v.limitations].join(' · ') : '')}</p><p class="muted">${html(c.candidate.sources.join(' + '))} · ${html(v ? 'Correspondencia temporal: ' + v.time_alignment : '')}${latest ? ' · ' + html(latest.model || '') + ' · ' + html(latest.duration_ms || 0) + ' ms' : ''}</p><label>Tu revisión<select onchange="labelSecurityCase(${c.id},this.value)"><option value="">Sin etiquetar</option>${[['person','Persona real'],['false_detection','Falsa detección'],['legitimate','Presencia legítima'],['unknown','No determinable']].map(([k,t]) => `<option value="${k}" ${c.label === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label></details></article>`;
+      const seenFrames=new Set();
+      const frames=(c.reviews || []).flatMap(r=>r.frames || []).filter(f=>{const key=f.sha256 || f.url;if(f.available === false || seenFrames.has(key))return false;seenFrames.add(key);return true;}).slice(0,6);
+      return `<article class="stat" style="margin-top:12px"><strong style="font-size:1rem">#${c.id}${v?.visual_verdict === 'person_visible' ? personIcon : ''} · ${c.candidate.kind === 'installation_check' ? 'Comprobación de instalación · ' : c.candidate.kind === 'historical_check' ? 'Comprobación histórica real · ' : c.candidate.kind === 'simulacro' ? 'Simulacro · ' : ''}${html(c.camera)} · ${html(c.detected_at)}</strong>${v?.visual_verdict === 'person_visible' ? '' : `<p>${html(v ? verdicts[v.visual_verdict] : 'Pendiente de revisión')}</p>`}<div style="margin-top:10px">${frames.length ? frames.map(f => `<figure style="display:inline-block;margin:0 8px 8px 0;vertical-align:top"><a href="${html(f.url)}" target="_blank" rel="noopener"><img src="${html(f.url)}" alt="Fotograma revisado del episodio ${c.id}" loading="lazy" style="max-width:280px;max-height:180px" /></a><figcaption class="muted">${html({event_anchor:'Original del evento',temporal_context:'Contexto de la grabación (±1 s)',detector_crop:'Recorte ampliado del original'}[f.role] || (f.source === 'notification_snapshot' ? 'Imagen del aviso' : 'Fotograma del episodio'))}${f.frame_time ? ' · '+html(new Date(Number(f.frame_time)*1000).toLocaleTimeString('es-ES')) : ''}</figcaption></figure>`).join('') : latest?.frames.length ? '<p class="muted">Imágenes caducadas o no disponibles.</p>' : ''}</div><details style="margin-top:10px"><summary>Detalles</summary>${c.candidate.kind === 'simulacro' ? `<p>Prueba de detección · luz: ${html(c.candidate.light_context || 'sin dato')} · tiempo informado por HA: ${html(c.candidate.environment?.['weather.aemet']?.state || c.candidate.environment?.['weather.casa']?.state || 'sin dato')}</p>` : ''}${c.filter_outcomes?.length ? `<p>Aviso Frigate: ${html(c.filter_outcomes.map(o=>({suppressed:'descartado por el filtro',notified:'enviado',timeout:'enviado al agotar la espera',already_notified:'ya enviado por otro detector',disarmed:'desarmado durante la espera',invalid_result:'aviso conservado'}[o.outcome] || 'pendiente')).join(' · '))}</p>` : ''}${c.candidate.recovered_alert ? '<p>Archivo del aviso original: enviado al agotar la espera. Revisión histórica; no genera otro aviso.</p>' : ''}<p>${html(v ? [...v.observations, ...v.limitations].join(' · ') : '')}</p><p class="muted">${html(c.candidate.sources.join(' + '))} · ${html(v ? 'Correspondencia temporal: ' + v.time_alignment : '')}${latest ? ' · ' + html(latest.model || '') + ' · ' + html(latest.duration_ms || 0) + ' ms' : ''}</p><label>Tu revisión<select onchange="labelSecurityCase(${c.id},this.value)"><option value="">Sin etiquetar</option>${[['person','Persona real'],['false_detection','Falsa detección'],['legitimate','Presencia legítima'],['unknown','No determinable']].map(([k,t]) => `<option value="${k}" ${c.label === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label></details></article>`;
     }).join('') : '<p>No hay episodios concluyentes para mostrar.</p>';
   } catch (err) { document.getElementById('visualSummary').textContent = err.message; }
 }

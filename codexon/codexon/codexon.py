@@ -9508,7 +9508,7 @@ async def run_agent_session(
 
             try:
                 visual_configs = camera_configs(agent.site_profile)
-                if visual_configs:
+                if visual_configs and (agent.site_profile.binding('security.visual_filter') or {}).get('provider') != 'chatgpt':
                     agent.security_visual_supervisor = SecurityVisualSupervisor(agent, log=runtime_log, configs=visual_configs)
                     tasks.append(asyncio.create_task(agent.security_visual_supervisor.run(stop)))
             except Exception as exc:

@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+from SecurityEventImage import event_image
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -1000,9 +1002,20 @@ class CameraSecurity(hass.Hass):
             return False
         self.last_alert[alert_key] = now
 
-        snapshot = self.take_snapshot(camera, now)
+        evidence = None
+        use_event_image = camera and kind in {"person", "frigate_person", "physical"}
+        if use_event_image and not image:
+            try:
+                evidence = event_image(camera, source,
+                    Path(self.args.get("home_assistant_config_dir", Path(__file__).resolve().parents[2])),
+                    base_url=self.args.get("frigate_url", "http://frigate:5000"))
+            except Exception as error:
+                self.log("Event attachment unavailable: %s", type(error).__name__, level="WARNING")
+        snapshot = evidence["snapshot"] if evidence else self.take_snapshot(camera, now)
         camera_entity = camera.get("camera_entity") if camera else None
-        image = image or self.camera_proxy_url(camera_entity)
+        image = image or (evidence["image"] if evidence else None)
+        if not use_event_image:
+            image = image or self.camera_proxy_url(camera_entity)
         click_action = click_action or image
 
         data = {
@@ -1034,6 +1047,8 @@ class CameraSecurity(hass.Hass):
             kind=kind,
             camera=camera_entity,
             snapshot=snapshot,
+            image_event_id=evidence["event_id"] if evidence else None,
+            notification_image=image,
         )
         self.publish_status(last_alert=now.isoformat(timespec="seconds"))
         self.log(f"Alert submitted to mobile service: {message}; snapshot={snapshot}")

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.21
+
+- Añade análisis de imágenes, audio y vídeo en la consola, con procesamiento local mediante FFmpeg y registro de consumo.
+- Permite usar la sesión de ChatGPT para análisis multimedia y revisiones de seguridad visual, sin recurrir automáticamente a una API de pago.
+- Amplía la evidencia visual con la foto original del evento Frigate, su recorte y fotogramas próximos del mismo evento.
+- Muestra también los episodios visuales inconclusos para que los errores de revisión no oculten las detecciones.
+- Conserva fotos de evento en los avisos del ejemplo opcional de AppDaemon, evitando imágenes en directo posteriores a la detección.
+
 ## 0.3.20
 
 - Un simple `codex` en la terminal web abre el workspace configurado con estos permisos, incluso si existe una configuración de proyecto antigua; los argumentos explícitos permiten cambiarlos.
