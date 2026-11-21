@@ -11,10 +11,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
-from ajustes import CONFIG, DB, ROOT, SITE, PEER
+from ajustes import CONFIG, DB, ROOT, SITE, PEER, SHARED, ACTIONS
 from escucha import peer
 METRIC = 'outdoor_temperature'
-ENTITY = CONFIG['temperature_entity']
+ENTITY = CONFIG.get('temperature_entity')
 BASE = '/intercambio/v1'
 BASE2 = '/intercambio/v2'
 
@@ -92,9 +92,9 @@ class API(BaseHTTPRequestHandler):
             elif uri.path == BASE+'/manifest':
                 data = dict(version=1, site=SITE, timezone=CONFIG['timezone'], operations=['latest','history'],
                             metrics=[dict(id=METRIC, unit='°C', kind='gauge', max_age_seconds=900)])
-            elif uri.path == BASE+'/latest/'+METRIC:
+            elif ENTITY and uri.path == BASE+'/latest/'+METRIC:
                 data = sample(fetch('/states/'+ENTITY))
-            elif uri.path == BASE+'/history/'+METRIC:
+            elif ENTITY and uri.path == BASE+'/history/'+METRIC:
                 try:
                     q = parse_qs(uri.query, strict_parsing=True)
                     if set(q) != {'start','end'} or any(len(v)!=1 for v in q.values()):
@@ -115,12 +115,31 @@ class API(BaseHTTPRequestHandler):
                 return self.reply(404, {'error':'not_found'})
         except Exception:
             return self.reply(503, {'error':'source_unavailable'})
+        if uri.path.endswith('/manifest'):
+            if not ENTITY:
+                data['metrics'] = []
+                data['operations'] = [op for op in data['operations'] if op not in ('history','latest')]
+            if uri.path.startswith(BASE2):
+                data['actions'] = sorted(ACTIONS)
         self.reply(200, data)
 
     def do_POST(self):
         if not self.authorized():
             return self.reply(401, {'error':'unauthorized'})
-        if urlsplit(self.path).path != BASE2+'/messages':
+        route = urlsplit(self.path).path
+        if route.startswith(BASE2+'/actions/'):
+            script = route.rsplit('/',1)[-1]
+            if route != BASE2+'/actions/'+script or script not in ACTIONS:
+                return self.reply(404, {'error':'unknown_action'})
+            request = Request('http://supervisor/core/api/services/script/turn_on',
+                              data=json.dumps({'entity_id':script}).encode(),
+                              headers={'Content-Type':'application/json','Authorization':'Bearer '+os.environ['SUPERVISOR_TOKEN']})
+            try:
+                with urlopen(request, timeout=10):
+                    return self.reply(202, {'requested':script})
+            except OSError:
+                return self.reply(503, {'error':'dispatch_unconfirmed'})
+        if route != BASE2+'/messages':
             return self.reply(404, {'error':'not_found'})
         try:
             size=int(self.headers.get('Content-Length','0'))
@@ -157,10 +176,10 @@ class API(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     path = (ROOT / 'token_entrante')
-    if not path.exists():
+    if not SHARED and not path.exists():
         with os.fdopen(os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600),'w') as f:
             f.write(secrets.token_urlsafe(48)+'\n')
-    key = path.read_text().strip()
+    key = SHARED or path.read_text().strip()
     if len(key) < 32:
         raise RuntimeError('Credencial entrante inválida')
     with sqlite3.connect(DB) as db:
@@ -168,8 +187,12 @@ if __name__ == '__main__':
         db.execute('CREATE TABLE IF NOT EXISTS outbox (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL)')
     from threading import Thread
     from escucha import listen
-    Thread(target=listen, args=(lambda: sample(fetch("/states/"+ENTITY)),), daemon=True).start()
+    Thread(target=listen, args=(lambda: sample(fetch("/states/"+ENTITY)) if ENTITY else {'value':None},), daemon=True).start()
     server = ThreadingHTTPServer(('0.0.0.0',18741),API)
+    local_path = ROOT/'token_appdaemon'
+    if not local_path.exists():
+        with os.fdopen(os.open(local_path, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600),'w') as f:
+            f.write(secrets.token_urlsafe(48))
     local_key = (ROOT/'token_appdaemon').read_text().strip()
     if len(local_key)<32 or local_key==key: raise ValueError('Revisar token_appdaemon')
     server.local_auth = ('Bearer '+local_key).encode()

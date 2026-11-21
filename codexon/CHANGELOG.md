@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.23
+
+Configuración por hogar, token compartido y acciones de Home Assistant publicadas como scripts.
+
 ## 0.3.22
 
 Intercambio opcional entre dos instalaciones con buzón persistente, respuestas automáticas y API para AppDaemon.

@@ -10,11 +10,13 @@ import uuid
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from ajustes import CONFIG, DB, ROOT, SITE, PEER
+from ajustes import CONFIG, DB, ROOT, SITE, PEER, SHARED
 
-HOST = CONFIG['peer_host']
+HOST = CONFIG.get('peer_host')
 
 def peer(method, route, payload=None):
+    if not HOST:
+        raise ValueError('Configurar peer_host para enviar')
     conn = http.client.HTTPSConnection(HOST, timeout=8)
     try:
         try:
@@ -22,7 +24,7 @@ def peer(method, route, payload=None):
         except socket.gaierror:
             sock = socket.create_connection((CONFIG['peer_ip'],443),8)
         conn.sock = ssl.create_default_context().wrap_socket(sock,server_hostname=HOST)
-        key = (ROOT / 'token_saliente').read_text().strip()
+        key = SHARED or (ROOT / 'token_saliente').read_text().strip()
         conn.request(method, '/intercambio/v2/messages'+route,
                      json.dumps(payload).encode() if payload else None,
                      {'Authorization':'Bearer '+key,'Content-Type':'application/json'})
@@ -72,6 +74,9 @@ def listen(temperature):
         try:
             for msg in db.execute('SELECT * FROM messages WHERE id NOT IN (SELECT id FROM listener WHERE done=1) ORDER BY rowid LIMIT 100').fetchall():
                 deliver(db,msg,temperature)
+            if not HOST:
+                time.sleep(20)
+                continue
             cursor = db.execute('SELECT id FROM cursor_remoto WHERE slot=1').fetchone()
             query = '?limit=100' + ('&after='+str(uuid.UUID(cursor[0])) if cursor else '')
             for msg in peer('GET',query)['messages']:

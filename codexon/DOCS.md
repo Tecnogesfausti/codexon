@@ -323,3 +323,7 @@ AppDaemon usa el nombre interno del complemento (consultar hostname en Superviso
     response.raise_for_status()
 
 201/200 indican aceptación por el par y 202 indica guardado local pendiente de entrega. Conservar ambos UUID al reintentar. Las respuestas llevan el mismo thread_id.
+
+Desde 0.3.23 se configura directamente en las opciones del complemento. Activar intercambio_enabled, indicar intercambio_site (nombre propio) y poner el mismo intercambio_token privado de al menos 32 caracteres en cada hogar participante. Para enviar respuestas automáticas configurar intercambio_peer e intercambio_peer_host con el nombre HTTPS del otro hogar; intercambio_peer_ip permite resolver fallos de DNS conservando el certificado. El sensor intercambio_temperature_entity y la lista intercambio_scripts son opcionales. Se conserva la lectura de config.json de instalaciones anteriores.
+
+AppDaemon o cualquier cliente con conectividad al endpoint puede usar ese mismo Bearer para entregar mensajes al hogar destino. GET /intercambio/v2/manifest enumera actions. POST /intercambio/v2/actions/script.nombre solicita el arranque de ese script configurado en el hogar receptor y devuelve 202. Si se pierde la respuesta, comprobar la ejecución antes de repetir la petición. Cada titular del token puede solicitar todas las acciones anunciadas del hogar. La interfaz de mensajes distingue el cliente local mediante token_appdaemon para consultar recibidos o enviar desde el hogar. No usar tokens en URLs.
