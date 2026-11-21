@@ -302,4 +302,10 @@ echo "[codexon] web terminal: ${WEB_TERMINAL_ENABLED} internal port ${CODEX_TERM
 echo "[codexon] codexon: ${CODEXON_ENABLED} internal web port ${CODEXON_WEB_PORT}"
 esphome-version-check || true
 echo "[codexon] start a shell with: docker exec -it <container> bash"
+if [[ "$(jq -r '.intercambio_enabled // false' "$CONFIG_PATH")" == true ]]; then
+  (while true; do
+     /opt/codexon/bin/python -u /usr/local/lib/codexon-intercambio/servidor.py || true
+     sleep 10
+   done) >>/data/codexon/intercambio.log 2>&1 &
+fi
 exec nginx -g "daemon off;"

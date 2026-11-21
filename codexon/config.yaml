@@ -1,6 +1,6 @@
 name: Codexon
 slug: codexon
-version: "0.3.21"
+version: "0.3.22"
 description: Codex CLI agent with broad Home Assistant Supervisor access
 url: https://github.com/Tecnogesfausti/codexon
 arch:
@@ -70,6 +70,7 @@ ports:
 ports_description:
   2222/tcp: Optional SSH access to the agent container
 options:
+  intercambio_enabled: false
   openai_api_key: ""
   openrouter_api_key: ""
   home_assistant_token: ""
@@ -98,6 +99,7 @@ options:
   codexon_whatsapp_wake_words: "casa|huerto|asistente|ia|robot"
   codexon_whatsup_wake_words: ""
 schema:
+  intercambio_enabled: bool
   openai_api_key: "password?"
   openrouter_api_key: "password?"
   home_assistant_token: "password?"

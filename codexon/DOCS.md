@@ -300,3 +300,26 @@ Usa [el perfil eléctrico de ejemplo](codexon/site.electricity.example.yaml) y a
 ## Error de arranque S6 / PID 1
 
 Desde 0.3.18 la imagen arranca directamente `codexon-entrypoint`, que inicia los servicios y deja nginx en primer plano. El complemento usa `host_pid: true` y no puede utilizar `/init` de S6 como inicializador. Si aparece `s6-overlay-suexec: fatal: can only run as pid 1` tras actualizar, refresca el catálogo e instala 0.3.18 o posterior. No añadas `init` a las opciones del usuario: es una propiedad de la configuración del complemento.
+
+## Intercambio entre dos Codexon
+
+Cada instancia expone la API v1 de temperatura e histórico y la API v2 de mensajes en el puerto interno 18741 al activar `intercambio_enabled`. El proceso escucha independientemente de la pestaña web. Responde a saludos y consultas de temperatura exterior y presenta otros mensajes como notificaciones persistentes en HA. Los mensajes no ejecutan órdenes de sistema.
+
+Configurar en cada complemento `/addon_config/intercambio/config.json`. Ejemplo para casa-a:
+
+    {"site":"casa-a","peer":"casa-b","timezone":"Europe/Madrid","temperature_entity":"sensor.estacion_meteo_temperatura_exterior","peer_host":"homeassistant-1.tailf49ff4.ts.net","peer_ip":"100.97.55.37"}
+
+Casa-b invierte site y peer, selecciona su sensor WH2650 real y utiliza el host e IP de casa-a. En el mismo directorio instalar token_entrante, token_saliente y token_appdaemon (tres secretos distintos, permisos 0600, mínimo 32 caracteres). El token saliente coincide con el entrante del par. Para migrar un buzón previo, parar su escucha, conservar una copia y migrar los mensajes con comprobación del esquema; el esquema de casa-a 2.1 es compatible. Redirigir Serve al puerto 18741 de Codexon después de comprobar las rutas internas.
+
+AppDaemon usa el nombre interno del complemento (consultar hostname en Supervisor), con `Authorization: Bearer <token_appdaemon>`. Guardar el secreto en la configuración privada de AppDaemon. GET /intercambio/v2/messages?limit=100 devuelve recibidos; after acepta el UUID del último mensaje procesado. POST /intercambio/v2/messages envía al par. Ejemplo desde un callback de AppDaemon:
+
+    import requests
+    import uuid
+    message_id = str(uuid.uuid4())
+    payload = {"id": message_id, "thread_id": message_id, "body": "¿Qué temperatura exterior hay?"}
+    response = requests.post(self.args["intercambio_url"] + "/intercambio/v2/messages",
+                             json=payload, headers={"Authorization": "Bearer " + self.args["intercambio_token"]},
+                             timeout=15)
+    response.raise_for_status()
+
+201/200 indican aceptación por el par y 202 indica guardado local pendiente de entrega. Conservar ambos UUID al reintentar. Las respuestas llevan el mismo thread_id.

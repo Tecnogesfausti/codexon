@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.22
+
+Intercambio opcional entre dos instalaciones con buzón persistente, respuestas automáticas y API para AppDaemon.
+
 ## 0.3.21
 
 - Añade análisis de imágenes, audio y vídeo en la consola, con procesamiento local mediante FFmpeg y registro de consumo.
