@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.25
+
+Actualiza la copia persistente de la API web al instalar la pestaña de WhatsApp.
+
 ## 0.3.24
 
 Pestaña de WhatsApp con chats, grupos, historial local y envío de texto.
