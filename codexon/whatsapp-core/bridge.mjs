@@ -81,6 +81,9 @@ async function startWhatsApp() {
   socket.ev.on('creds.update', saveCreds);
   socket.ev.on('connection.update', handleConnectionUpdate);
   socket.ev.on('messages.upsert', handleMessagesUpsert);
+  socket.ev.on('groups.update', groups => groups.forEach(group => {
+    if (group.subject) upsertContact({id: group.id, subject: group.subject});
+  }));
   socket.ev.on('contacts.upsert', handleContacts);
   socket.ev.on('contacts.update', handleContacts);
   if (REJECT_CALLS) {
@@ -114,6 +117,10 @@ async function handleConnectionUpdate(update) {
     writeStatus();
     emitStatus();
     logger.info('sesion WhatsApp conectada');
+    try {
+      const groups = await socket.groupFetchAllParticipating();
+      for (const group of Object.values(groups)) upsertContact({id: group.id, subject: group.subject});
+    } catch { logger.warn('No se pudo actualizar el listado de grupos'); }
   }
   if (connection === 'close') {
     const statusCode = lastDisconnect?.error?.output?.statusCode;
@@ -145,7 +152,7 @@ async function handleMessagesUpsert({ messages, type }) {
     delete persisted.imageBase64;
     lastMessage = persisted;
     messageCount += 1;
-    upsertContact({
+    if (!normalized.fromMe && !normalized.from.endsWith('@g.us')) upsertContact({
       id: normalized.from,
       name: normalized.pushName,
       notify: normalized.pushName
@@ -237,7 +244,8 @@ function upsertContact(contact) {
     contact.id;
   contacts.set(contact.id, {
     id: contact.id,
-    name: displayName,
+    subject: contact.subject || previous.subject,
+    name: contact.subject || previous.subject || displayName,
     notify: contact.notify || previous.notify || '',
     verifiedName: contact.verifiedName || previous.verifiedName || '',
     phone: jidToPhone(contact.id)

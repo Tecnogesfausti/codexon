@@ -1,0 +1,30 @@
+<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WhatsApp</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111b21;color:#e9edef;font:16px system-ui;height:100dvh;display:grid;grid-template-columns:minmax(180px,30%) 1fr}aside,main{min-height:0;min-width:0;padding:12px;display:flex;flex-direction:column;gap:8px}aside{background:#202c33}nav,article{overflow:auto}button,input,textarea{font:inherit;border:0;border-radius:6px;padding:9px}button{cursor:pointer;background:#33434b;color:white}button:disabled{opacity:.5}nav button{display:block;width:100%;text-align:left;margin-bottom:3px;overflow-wrap:anywhere}nav button[aria-current=true],form button{background:#006b54}article{flex:1}section{background:#263840;padding:8px 12px;margin:6px 0;border-radius:8px;width:fit-content;max-width:85%;white-space:pre-wrap;overflow-wrap:anywhere}section.mine{margin-left:auto;background:#005c4b}small{display:block;color:#b4c5c9}form{display:flex;gap:8px}textarea{flex:1;min-width:0}header{font-weight:bold}#back{display:none}@media(max-width:620px){body{display:block}aside,main{height:100%}body:not(.open) main,body.open aside{display:none}#back{display:inline}}
+</style>
+<aside><header>Chats</header><input id="search" type="search" placeholder="Buscar chat o grupo" aria-label="Buscar chat o grupo"><nav></nav></aside>
+<main><header><button id="back">Chats</button> <span id="titleChat">Selecciona una conversación</span></header><article></article><form><textarea aria-label="Mensaje" placeholder="Mensaje" maxlength="3500" disabled></textarea><button disabled>Enviar</button></form><output aria-live="polite"></output></main>
+<script>
+const $=s=>document.querySelector(s), log=$('article'), draft=$('textarea'), send=$('form button'), status=$('output');
+let chats={}, current='', busy=false, signature='', loading=false;
+const drafts=new Map();
+function list(){
+ const nav=$('nav');nav.replaceChildren();
+ for(const [jid,c] of Object.entries(chats).sort((a,b)=>(b[1].messages.at(-1)?.time||0)-(a[1].messages.at(-1)?.time||0)||a[1].name.localeCompare(b[1].name))){
+  const label=(jid.endsWith('@g.us')?'Grupo · ':'')+c.name;
+  if(!label.toLocaleLowerCase().includes($('#search').value.toLocaleLowerCase()))continue;
+  const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-current',String(jid===current));b.onclick=()=>{drafts.set(current,draft.value);current=jid;draft.value=drafts.get(jid)||'';document.body.classList.add('open');signature='';status.textContent='';render();list()};nav.append(b)
+ }
+}
+function render(){
+ const c=chats[current];draft.disabled=send.disabled=!c||busy;if(!c)return;
+ $('#titleChat').textContent=c.name;const key=JSON.stringify(c.messages);if(key===signature)return;
+ const bottom=!signature||log.scrollHeight-log.scrollTop-log.clientHeight<45;signature=key;log.replaceChildren();
+ for(const m of c.messages){const box=document.createElement('section'),meta=document.createElement('small');box.className=m.mine?'mine':'';meta.textContent=(m.mine?'Tú':m.author||c.name)+' · '+new Date(Number(m.time)*1000).toLocaleString('es');box.append(meta,document.createTextNode(m.body));log.append(box)}
+ if(bottom)log.scrollTop=log.scrollHeight
+}
+async function refresh(){if(loading)return;loading=true;try{const r=await fetch('./stats/api/whatsapp/chats',{cache:'no-store'});if(!r.ok)throw Error();chats=(await r.json()).chats;list();render()}catch{status.textContent='No se pudieron cargar los chats'}finally{loading=false}}
+$('form').onsubmit=async e=>{e.preventDefault();const recipient=current,message=draft.value.trim();if(!recipient||!message||busy)return;busy=true;render();
+ try{const r=await fetch('./stats/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recipient,message})});if(!r.ok)throw Error();drafts.delete(recipient);if(current===recipient)draft.value='';status.textContent='Envío en cola'}catch{status.textContent='No se pudo confirmar el envío'}finally{busy=false;render()}};
+$('#search').oninput=list;$('#back').onclick=()=>document.body.classList.remove('open');refresh();setInterval(()=>{if(!document.hidden)refresh()},8000)
+</script></html>

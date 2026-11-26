@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.24
+
+Pestaña de WhatsApp con chats, grupos, historial local y envío de texto.
+
 ## 0.3.23
 
 Configuración por hogar, token compartido y acciones de Home Assistant publicadas como scripts.

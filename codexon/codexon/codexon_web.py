@@ -899,6 +899,24 @@ def api_whatsapp_messages(limit: int = 30) -> dict[str, Any]:
     return {"messages": list(reversed(messages))}
 
 
+@app.get("/api/whatsapp/chats")
+def whatsapp_chats() -> dict[str, Any]:
+    chats = {}
+    for row in whatsapp_json_rows("contacts.json", "contacts", limit=10000):
+        jid = row.get("id", "")
+        if jid.endswith(("@g.us", "@s.whatsapp.net", "@lid")):
+            name = row.get("subject") if jid.endswith("@g.us") else row.get("name")
+            chats[jid] = {"name": name or jid, "messages": []}
+    for row in whatsapp_json_rows("messages.json", "messages", limit=5000):
+        jid = row.get("to") or row.get("from") or ""
+        if not jid.endswith(("@g.us", "@s.whatsapp.net", "@lid")):
+            continue
+        chat = chats.setdefault(jid, {"name": jid, "messages": []})
+        chat["messages"].append({"body": row.get("body", ""), "author": row.get("pushName", ""),
+                                 "time": row.get("timestamp"), "mine": bool(row.get("fromMe") or row.get("direction") == "outgoing")})
+    return {"chats": chats}
+
+
 @app.post("/api/whatsapp/send")
 def api_whatsapp_send(payload: dict[str, Any]) -> dict[str, Any]:
     status = whatsapp_status(include_qr=False)
